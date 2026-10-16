@@ -3,7 +3,8 @@
 import opencascade from 'replicad-opencascadejs';
 import wasmUrl from 'replicad-opencascadejs/wasm?url';
 import { setOC } from 'replicad';
-import { buildModel, type BuildResult } from './brep';
+import { buildModel, disposeBuild, type BuildResult } from './brep';
+import { GeometryCache } from './cache';
 import { exportParts, previewStep } from './output';
 import type { WorkerRequest, WorkerResponse } from './protocol';
 
@@ -18,6 +19,7 @@ const ready = (async () => {
 })();
 
 let current: BuildResult | null = null;
+const cache = new GeometryCache();
 
 const stepBuffer = async (blob: Blob) => blob.arrayBuffer();
 
@@ -27,7 +29,10 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
     await ready;
     if (msg.type === 'build') {
       const t0 = performance.now();
-      current = buildModel(msg.input, msg.settings, (m) => post({ type: 'progress', id: msg.id, message: m }));
+      const next = buildModel(msg.input, msg.settings, (m) => post({ type: 'progress', id: msg.id, message: m }), cache);
+      if (current) disposeBuild(current);
+      current = next;
+      cache.trim();
       post({ type: 'progress', id: msg.id, message: 'Writing STEP preview' });
       const step = await stepBuffer(previewStep(current, msg.preview));
       post(
@@ -39,6 +44,7 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
           warnings: current.warnings,
           doubleSided: current.doubleSided,
           ms: Math.round(performance.now() - t0),
+          cacheHits: current.cacheHits,
         },
         [step],
       );

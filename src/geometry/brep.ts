@@ -8,9 +8,11 @@ import { circlesFace, contourFace, drillsFace, layerFace, type FaceStats } from 
 import { common, cutAll, fuseAll, isNullOrEmpty, isValid, prism, unify } from './occ';
 import { placeDowels } from './dowels';
 import { chamferTools, type ChamferStats } from './chamfer';
+import { GeometryCache, hashValue } from './cache';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TopoShape = any;
+type Warn = (w: string) => void;
 
 export type PartId = 'board' | 'topHalf' | 'bottomHalf' | 'dowels' | 'stampTop' | 'stampBottom';
 
@@ -36,6 +38,8 @@ export interface BuildResult {
   dowelPositions: Pt[];
   dowelLength: number;
   dowelDiameter: number;
+  /** Stages reused from the geometry cache in this build. */
+  cacheHits: number;
 }
 
 export const COLORS = {
@@ -55,9 +59,31 @@ const PART_LABELS: Record<PartId, string> = {
 };
 
 const as3D = (s: AnyShape) => s as Shape3D;
+const key = (...parts: unknown[]) => parts.map((p) => (typeof p === 'number' ? String(+p.toFixed(5)) : String(p))).join('|');
 
-export function buildModel(input: BoardInput, s: Settings, log: (msg: string) => void = () => {}): BuildResult {
+/** Dispose all bodies of a build (they are clones, never shared with the cache). */
+export function disposeBuild(r: BuildResult) {
+  for (const p of r.parts) for (const b of p.bodies) b.shape.delete();
+}
+
+export function buildModel(
+  input: BoardInput,
+  s: Settings,
+  log: (msg: string) => void = () => {},
+  cache: GeometryCache = new GeometryCache(),
+): BuildResult {
+  cache.scope(hashValue(input));
   const warnings: string[] = [];
+  /** Run a cached stage; warnings it raised are stored with it and replayed on a cache hit. */
+  const staged = <T>(k: string, make: (warn: Warn) => T): T => {
+    const r = cache.get(k, () => {
+      const w: string[] = [];
+      return { value: make((m) => w.push(m)), warnings: w };
+    });
+    warnings.push(...r.warnings);
+    return r.value;
+  };
+
   const hasTop = !!input.top?.some((p) => p.dark);
   const hasBottom = !!input.bottom?.some((p) => p.dark);
   const sides = resolveSides(s.sides, hasTop, hasBottom);
@@ -66,57 +92,63 @@ export function buildModel(input: BoardInput, s: Settings, log: (msg: string) =>
   const doubleSided = sides === 'both';
 
   // ---- outline ----
-  log('Building outline');
-  let shapes: OutlineShape[] = [];
-  if (s.outlineSource === 'edge-cuts') {
-    if (input.outline?.length) {
-      const r = buildOutline(input.outline);
-      shapes = r.shapes;
-      if (r.openSegments) warnings.push(`${r.openSegments} outline segment(s) did not form a closed loop and were ignored.`);
-      if (!shapes.length) warnings.push('Outline layer has no closed contour; using the bounding box instead.');
-    } else {
-      warnings.push('No outline (Edge.Cuts) layer; using the copper bounding box.');
+  const outlineKey = key('outline', s.outlineSource, s.margin);
+  const { shapes, bounds, outlineFace } = staged(outlineKey, (warn) => {
+    log('Building outline');
+    let shapes: OutlineShape[] = [];
+    if (s.outlineSource === 'edge-cuts') {
+      if (input.outline?.length) {
+        const r = buildOutline(input.outline);
+        shapes = r.shapes;
+        if (r.openSegments) warn(`${r.openSegments} outline segment(s) did not form a closed loop and were ignored.`);
+        if (!shapes.length) warn('Outline layer has no closed contour; using the bounding box instead.');
+      } else {
+        warn('No outline (Edge.Cuts) layer; using the copper bounding box.');
+      }
     }
-  }
-  if (!shapes.length) {
-    const b = emptyBounds();
-    if (hasTop) primitivesBounds(input.top!, b);
-    if (hasBottom) primitivesBounds(input.bottom!, b);
-    drillsBounds(input.drills, b);
-    if (isEmpty(b)) throw new Error('Nothing to build: the layers are empty.');
-    const m = s.margin;
-    shapes = [{ outer: rectContour(b.minX - m, b.minY - m, b.maxX + m, b.maxY + m), holes: [] }];
-  }
-  const bounds = emptyBounds();
-  for (const sh of shapes) for (const p of contourPoints(sh.outer)) addPt(bounds, p);
+    if (!shapes.length) {
+      const b = emptyBounds();
+      if (hasTop) primitivesBounds(input.top!, b);
+      if (hasBottom) primitivesBounds(input.bottom!, b);
+      drillsBounds(input.drills, b);
+      if (isEmpty(b)) throw new Error('Nothing to build: the layers are empty.');
+      const m = s.margin;
+      shapes = [{ outer: rectContour(b.minX - m, b.minY - m, b.maxX + m, b.maxY + m), holes: [] }];
+    }
+    const bounds = emptyBounds();
+    for (const sh of shapes) for (const p of contourPoints(sh.outer)) addPt(bounds, p);
+    const outlineFace: TopoShape = unify(fuseAll(shapes.map((sh) => contourFace(sh.outer, sh.holes))));
+    return { shapes, bounds, outlineFace };
+  });
   const cx = (bounds.minX + bounds.maxX) / 2;
-  const outlineFace = unify(fuseAll(shapes.map((sh) => contourFace(sh.outer, sh.holes))));
 
-  const stats: FaceStats = { failed: 0 };
-  const copperFaceCache = new Map<string, TopoShape | null>();
-  const copperFace = (side: 'top' | 'bottom', offset: number): TopoShape | null => {
-    const key = `${side}:${offset.toFixed(5)}`;
-    if (copperFaceCache.has(key)) return copperFaceCache.get(key)!;
-    log(`Merging ${side} copper (offset ${offset.toFixed(2)} mm)`);
-    const prims = (side === 'top' ? input.top : input.bottom) ?? [];
-    let f = layerFace(prims, offset, stats);
-    if (f) {
-      f = unify(common(f, outlineFace));
-      if (isNullOrEmpty(f)) f = null;
-    }
-    copperFaceCache.set(key, f);
-    return f;
-  };
+  /** Merged copper of one side grown by `offset`, clipped to the outline (shared, do not consume). */
+  const copperFace = (side: 'top' | 'bottom', offset: number): TopoShape | null =>
+    staged(key(outlineKey, 'copper', side, offset), (warn) => {
+      log(`Merging ${side} copper (offset ${offset.toFixed(2)} mm)`);
+      const prims = (side === 'top' ? input.top : input.bottom) ?? [];
+      const st: FaceStats = { failed: 0 };
+      let f = layerFace(prims, offset, st);
+      if (st.failed) warn(`${st.failed} copper primitive(s) could not be converted and were skipped.`);
+      if (f) {
+        f = unify(common(f, outlineFace));
+        if (isNullOrEmpty(f)) f = null;
+      }
+      return f;
+    });
 
-  log('Building holes');
-  const holesFace = s.holes ? drillsFace(input.drills, s.holeOffset, s.minHoleDiameter) : null;
-  const holesSolid = holesFace ? prism(holesFace, -50, 200) : null;
+  const holesKey = key('holes', s.holes, s.holeOffset, s.minHoleDiameter);
+  const holesSolid: AnyShape | null = cache.get(holesKey, () => {
+    log('Building holes');
+    const holesFace = s.holes ? drillsFace(input.drills, s.holeOffset, s.minHoleDiameter) : null;
+    return holesFace ? prism(holesFace, -50, 200) : null;
+  });
   const mirrorX = <T extends AnyShape>(shape: T): T => shape.mirror('YZ', [cx, 0, 0]) as T;
 
   /** Chamfer the top rim of the recessed channels (before drilling, so holes stay sharp). */
-  const chamferChannels = (board: Shape3D, side: 'top' | 'bottom', top: number, depth: number): Shape3D => {
+  const chamferChannels = (board: Shape3D, side: 'top' | 'bottom', top: number, depth: number, warn: Warn): Shape3D => {
     const size = Math.min(s.channelChamfer, depth - 0.05);
-    if (size < s.channelChamfer) warnings.push(`Channel chamfer limited to ${size.toFixed(2)} mm by the channel depth.`);
+    if (size < s.channelChamfer) warn(`Channel chamfer limited to ${size.toFixed(2)} mm by the channel depth.`);
     if (size <= 0.01) return board;
     log(`Chamfering ${side} channels`);
     const prims = (side === 'top' ? input.top : input.bottom) ?? [];
@@ -124,18 +156,18 @@ export function buildModel(input: BoardInput, s: Settings, log: (msg: string) =>
     try {
       const tools = chamferTools(prims, s.copperOffset, top, size, cs);
       const chamfered = as3D(cast(cutAll(board.wrapped, tools)));
-      if (cs.stepped) warnings.push(`${cs.stepped} irregular copper shape(s) got a stepped chamfer approximation.`);
-      if (cs.failed) warnings.push(`${cs.failed} copper shape(s) could not be chamfered.`);
+      if (cs.stepped) warn(`${cs.stepped} irregular copper shape(s) got a stepped chamfer approximation.`);
+      if (cs.failed) warn(`${cs.failed} copper shape(s) could not be chamfered.`);
       if (isValid(chamfered.wrapped)) return chamfered;
     } catch {
       /* fall through */
     }
-    warnings.push('Channel chamfer failed; channels left sharp.');
+    warn('Channel chamfer failed; channels left sharp.');
     return board;
   };
 
   // ---- board / halves ----
-  const slab = (thickness: number, side: 'top' | 'bottom', socketsFace: TopoShape | null, socketDepth: number) => {
+  const buildSlab = (thickness: number, side: 'top' | 'bottom', socketsFace: TopoShape | null, socketDepth: number, warn: Warn) => {
     let board = as3D(prism(outlineFace, 0, thickness));
     let copper: Shape3D | null = null;
     const cf = copperFace(side, s.copperOffset);
@@ -144,15 +176,15 @@ export function buildModel(input: BoardInput, s: Settings, log: (msg: string) =>
         let d = s.traceDepth;
         if (d > thickness - 0.2) {
           d = Math.max(0.1, thickness - 0.2);
-          warnings.push(`Trace depth reduced to ${d.toFixed(2)} mm to leave a floor under the channels.`);
+          warn(`Trace depth reduced to ${d.toFixed(2)} mm to leave a floor under the channels.`);
         }
         board = board.cut(as3D(prism(cf, thickness - d, d + 1)));
-        if (s.channelChamfer > 0) board = chamferChannels(board, side, thickness, d);
+        if (s.channelChamfer > 0) board = chamferChannels(board, side, thickness, d, warn);
       } else {
         copper = as3D(prism(cf, thickness, s.traceHeight));
       }
     } else {
-      warnings.push(`The ${side} copper layer is empty after clipping to the outline.`);
+      warn(`The ${side} copper layer is empty after clipping to the outline.`);
     }
     if (socketsFace) board = board.cut(as3D(prism(socketsFace, -1, socketDepth + 1)));
     if (holesSolid) {
@@ -160,6 +192,13 @@ export function buildModel(input: BoardInput, s: Settings, log: (msg: string) =>
       if (copper) copper = copper.cut(as3D(holesSolid));
     }
     return { board, copper };
+  };
+  const slab = (thickness: number, side: 'top' | 'bottom', socketsFace: TopoShape | null, socketDepth: number, socketsKey = '') => {
+    const featureH = s.mode === 'recessed' ? s.traceDepth : s.traceHeight;
+    const chamfer = s.mode === 'recessed' ? s.channelChamfer : 0;
+    const k = key(outlineKey, holesKey, 'slab', thickness, side, s.mode, featureH, chamfer, s.copperOffset, socketsKey, socketDepth);
+    const r = staged(k, (warn) => buildSlab(thickness, side, socketsFace, socketDepth, warn));
+    return { board: r.board.clone(), copper: r.copper ? r.copper.clone() : null };
   };
 
   const bodiesOf = (r: { board: Shape3D; copper: Shape3D | null }, label: string): Body[] => {
@@ -184,6 +223,7 @@ export function buildModel(input: BoardInput, s: Settings, log: (msg: string) =>
   } else {
     const half = T / 2;
     let socketsFace: TopoShape | null = null;
+    let socketsKey = '';
     let depth = 0;
     if (s.alignmentDowels && s.dowelCount > 0) {
       depth = Math.min(s.dowelDepth, half - 0.3);
@@ -191,28 +231,28 @@ export function buildModel(input: BoardInput, s: Settings, log: (msg: string) =>
       if (depth >= 0.3) {
         const socketR = (s.dowelDiameter + s.dowelClearance) / 2;
         const avoid = s.mode === 'recessed' && s.traceDepth + depth > half - 0.2;
-        dowelPositions = placeDowels(shapes, bounds, input.drills, s.dowelCount, socketR, s.dowelEdgeMargin, avoid ? [...(input.top ?? []), ...(input.bottom ?? [])] : []);
-        if (dowelPositions.length < s.dowelCount)
-          warnings.push(`Only ${dowelPositions.length} of ${s.dowelCount} dowel positions fit on the board.`);
-        socketsFace = circlesFace(dowelPositions, socketR);
+        dowelPositions = cache.get(key(outlineKey, 'dowels', s.dowelCount, socketR, s.dowelEdgeMargin, avoid), () =>
+          placeDowels(shapes, bounds, input.drills, s.dowelCount, socketR, s.dowelEdgeMargin, avoid ? [...(input.top ?? []), ...(input.bottom ?? [])] : []),
+        );
+        if (dowelPositions.length < s.dowelCount) warnings.push(`Only ${dowelPositions.length} of ${s.dowelCount} dowel positions fit on the board.`);
+        socketsKey = key('sockets', socketR, JSON.stringify(dowelPositions));
+        socketsFace = cache.get(socketsKey, () => circlesFace(dowelPositions, socketR));
         dowelLength = Math.max(0.4, 2 * depth - 0.2);
       } else {
         warnings.push('Board halves are too thin for dowel sockets; dowels skipped.');
       }
     }
     log('Building top half');
-    parts.push({ id: 'topHalf', label: PART_LABELS.topHalf, bodies: bodiesOf(slab(half, 'top', socketsFace, depth), 'Top half') });
+    parts.push({ id: 'topHalf', label: PART_LABELS.topHalf, bodies: bodiesOf(slab(half, 'top', socketsFace, depth, socketsKey), 'Top half') });
     log('Building bottom half');
     parts.push({
       id: 'bottomHalf',
       label: PART_LABELS.bottomHalf,
-      bodies: mirrorBodies(bodiesOf(slab(half, 'bottom', socketsFace, depth), 'Bottom half')),
+      bodies: mirrorBodies(bodiesOf(slab(half, 'bottom', socketsFace, depth, socketsKey), 'Bottom half')),
     });
     if (dowelPositions.length) {
       const r = s.dowelDiameter / 2;
-      const pins = dowelPositions.map((_, i) =>
-        makeCylinder(r, dowelLength, [bounds.maxX + 6 + r, bounds.minY + r + i * (2 * r + 3), 0]),
-      );
+      const pins = dowelPositions.map((_, i) => makeCylinder(r, dowelLength, [bounds.maxX + 6 + r, bounds.minY + r + i * (2 * r + 3), 0]));
       const shape = pins.length === 1 ? pins[0] : as3D(cast(fuseAll(pins.map((p) => p.wrapped))));
       parts.push({ id: 'dowels', label: PART_LABELS.dowels, bodies: [{ name: 'Dowels', shape, color: COLORS.dowel }] });
     }
@@ -222,9 +262,12 @@ export function buildModel(input: BoardInput, s: Settings, log: (msg: string) =>
   if (s.stampEnabled) {
     const stampSides: ('top' | 'bottom')[] = doubleSided ? ['top', 'bottom'] : [sides as 'top' | 'bottom'];
     for (const side of stampSides) {
-      log(`Building ${side} stamp`);
-      const stamp = buildStamp(side);
-      if (!stamp) continue;
+      const stampKey = key(outlineKey, holesKey, 'stamp', side, s.mode, s.copperOffset, s.traceDepth, s.traceHeight, s.stampThickness, s.stampClearance,
+        s.tapeThickness, s.stampFeatureOverride, s.alignmentPins, s.pinMinHoleDiameter, s.pinClearance, s.pinLength, s.cuttingRidge, s.ridgeWidth, s.ridgeHeight);
+      const stamp = staged(stampKey, (warn) => {
+        log(`Building ${side} stamp`);
+        return buildStamp(side, warn);
+      }).clone();
       // The stamp is flipped face-down onto the printed board face, so it is the mirror of that face.
       const boardFaceMirrored = side === 'bottom';
       const shape = boardFaceMirrored ? stamp : mirrorX(stamp);
@@ -233,7 +276,7 @@ export function buildModel(input: BoardInput, s: Settings, log: (msg: string) =>
     }
   }
 
-  function buildStamp(side: 'top' | 'bottom'): Shape3D | null {
+  function buildStamp(side: 'top' | 'bottom', warn: Warn): Shape3D {
     let ts = s.stampThickness;
     const tape = s.tapeThickness;
     let stamp: Shape3D;
@@ -244,14 +287,14 @@ export function buildModel(input: BoardInput, s: Settings, log: (msg: string) =>
       const ribFace = copperFace(side, s.copperOffset - s.stampClearance);
       stamp = as3D(prism(outlineFace, 0, ts));
       if (ribFace) stamp = stamp.fuse(as3D(prism(ribFace, ts, ribH)));
-      else warnings.push(`The ${side} stamp has no ribs (copper too thin for the clearance).`);
+      else warn(`The ${side} stamp has no ribs (copper too thin for the clearance).`);
       pinBase = ts;
       pinTop = ts + s.pinLength;
     } else {
       const depth = s.stampFeatureOverride > 0 ? s.stampFeatureOverride : s.traceHeight;
       if (ts < depth + 0.6) {
         ts = depth + 0.6;
-        warnings.push(`Stamp thickness increased to ${ts.toFixed(2)} mm to fit the pockets.`);
+        warn(`Stamp thickness increased to ${ts.toFixed(2)} mm to fit the pockets.`);
       }
       const c = s.copperOffset + s.stampClearance + tape;
       const pocketFace = copperFace(side, c);
@@ -285,13 +328,12 @@ export function buildModel(input: BoardInput, s: Settings, log: (msg: string) =>
         const f = fuseAll(pinFaces);
         stamp = stamp.fuse(as3D(prism(f, pinBase, pinTop - pinBase)));
       } else {
-        warnings.push(`No holes ≥ ${s.pinMinHoleDiameter} mm for stamp alignment pins.`);
+        warn(`No holes ≥ ${s.pinMinHoleDiameter} mm for stamp alignment pins.`);
       }
     }
     return stamp;
   }
 
-  if (stats.failed) warnings.push(`${stats.failed} copper primitive(s) could not be converted and were skipped.`);
   return {
     name: input.name,
     parts,
@@ -301,6 +343,7 @@ export function buildModel(input: BoardInput, s: Settings, log: (msg: string) =>
     dowelPositions,
     dowelLength,
     dowelDiameter: s.dowelDiameter,
+    cacheHits: cache.hits,
   };
 }
 

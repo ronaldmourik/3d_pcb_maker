@@ -45,6 +45,7 @@ export function useBoardBuild() {
   const [busy, setBusy] = useState<string | null>(null);
   const [building, setBuilding] = useState(false);
   const [buildMs, setBuildMs] = useState<number | null>(null);
+  const [cacheHits, setCacheHits] = useState(0);
   const buildingRef = useRef(false);
   const previewRef = useRef(preview);
   previewRef.current = preview;
@@ -78,6 +79,7 @@ export function useBoardBuild() {
       setWarnings(res.warnings);
       setDoubleSided(res.doubleSided);
       setBuildMs(res.ms);
+      setCacheHits(res.cacheHits);
       markBuilding(false);
       setBusy(null);
     } catch (e) {
@@ -180,6 +182,7 @@ export function useBoardBuild() {
     busy,
     building,
     buildMs,
+    cacheHits,
     hasTop,
     hasBottom,
     hasOutline,

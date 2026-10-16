@@ -17,6 +17,6 @@ export type WorkerResponse =
   | { type: 'ready' }
   | { type: 'progress'; id: number; message: string }
   | { type: 'error'; id: number; message: string }
-  | { type: 'built'; id: number; step: ArrayBuffer; parts: PartInfo[]; warnings: string[]; doubleSided: boolean; ms: number }
+  | { type: 'built'; id: number; step: ArrayBuffer; parts: PartInfo[]; warnings: string[]; doubleSided: boolean; ms: number; cacheHits: number }
   | { type: 'preview'; id: number; step: ArrayBuffer }
   | { type: 'file'; id: number; name: string; data: ArrayBuffer };

@@ -6,7 +6,8 @@ import { cast, getOC, measureVolume } from 'replicad';
 import { fixtureLayers, initOC } from './helpers';
 import { toBoardInput } from '../src/gerber/loadFiles';
 import { layerFace } from '../src/geometry/faces';
-import { buildModel } from '../src/geometry/brep';
+import { buildModel, disposeBuild } from '../src/geometry/brep';
+import { GeometryCache } from '../src/geometry/cache';
 import { isValid } from '../src/geometry/occ';
 import { defaultSettings } from '../src/state/settings';
 
@@ -61,6 +62,37 @@ describe('ketel_opto double-sided', () => {
     exp.delete();
     expect(solids).toBe(23);
     expect(measureVolume(copper)).toBeGreaterThan(300);
+  });
+
+  it('reuses cached stages and gives identical results', () => {
+    const cache = new GeometryCache();
+    const base = { ...defaultSettings, sides: 'both' as const, mode: 'recessed' as const, channelChamfer: 0.2 };
+    const t0 = Date.now();
+    const first = buildModel(input(), base, undefined, cache);
+    const tFirst = Date.now() - t0;
+    expect(first.cacheHits).toBe(0);
+
+    // Only a stamp setting changes: outline, copper, holes and both halves come from the cache.
+    const t1 = Date.now();
+    const second = buildModel(input(), { ...base, stampEnabled: true }, undefined, cache);
+    const tSecond = Date.now() - t1;
+    expect(second.cacheHits).toBeGreaterThanOrEqual(4);
+    for (const id of ['topHalf', 'bottomHalf']) {
+      const v = (r: typeof first) => measureVolume(r.parts.find((p) => p.id === id)!.bodies[0].shape);
+      expect(v(second)).toBeCloseTo(v(first), 6);
+    }
+    expect(second.warnings).toEqual(first.warnings);
+    // The chamfered halves dominate the first build; the second only builds the stamps.
+    expect(tSecond).toBeLessThan(tFirst);
+
+    // Disposing a build must not break the cache (results are clones).
+    disposeBuild(first);
+    const third = buildModel(input(), base, undefined, cache);
+    expect(isValid(third.parts[0].bodies[0].shape.wrapped)).toBe(true);
+
+    // A different input clears the cache.
+    const other = buildModel(toBoardInput(fixtureLayers(['ketel_opto/ketel_opto-B_Cu.gbr', 'ketel_opto/ketel_opto-Edge_Cuts.gbr'])), { ...base, sides: 'bottom' }, undefined, cache);
+    expect(other.cacheHits).toBe(0);
   });
 
   it('chamfers recessed channels on both halves', () => {

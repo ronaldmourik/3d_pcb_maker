@@ -48,7 +48,7 @@ export default function App() {
             </label>
           )}
           <span className="status">
-            {!b.engineReady ? 'Loading geometry engine…' : b.buildMs !== null && !b.busy ? `Built in ${(b.buildMs / 1000).toFixed(1)} s` : ''}
+            {!b.engineReady ? 'Loading geometry engine…' : b.buildMs !== null && !b.busy ? `Built in ${(b.buildMs / 1000).toFixed(1)} s${b.cacheHits ? ` · reused ${b.cacheHits} cached step${b.cacheHits === 1 ? "" : "s"}` : ""}` : ''}
           </span>
           {b.busy && b.building && <button onClick={b.cancel}>Cancel</button>}
           <ExportBar parts={b.parts} busy={!!b.busy} onExport={b.exportPart} />
