@@ -8,6 +8,8 @@ interface Props {
   fitKey: string;
   busy: boolean;
   busyText?: string;
+  /** Zoom to a point (preview coordinates); `n` changes per request. */
+  focus?: { at: [number, number, number]; n: number } | null;
 }
 
 interface LoadJob {
@@ -15,7 +17,7 @@ interface LoadJob {
   fitKey: string;
 }
 
-export function Viewer({ step, fitKey, busy, busyText }: Props) {
+export function Viewer({ step, fitKey, busy, busyText, focus }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const viewer = useRef<OV.EmbeddedViewer | null>(null);
   const fitKeyRef = useRef(fitKey);
@@ -83,6 +85,17 @@ export function Viewer({ step, fitKey, busy, busyText }: Props) {
   useEffect(() => {
     if (step) start({ step, fitKey: fitKeyRef.current });
   }, [step]);
+
+  useEffect(() => {
+    const v = viewer.current;
+    if (!v || !focus || !v.model) return;
+    const [x, y, z] = focus.at;
+    const viewerObj = v.GetViewer();
+    // Look down at the spot from slightly in front, close enough to see a trace.
+    const up = z >= 0 ? 1 : -1;
+    viewerObj.SetCamera(new OV.Camera(new OV.Coord3D(x, y - 6, z + up * 14), new OV.Coord3D(x, y, z), new OV.Coord3D(0, 0, up), 45));
+    viewerObj.Render();
+  }, [focus]);
 
   return (
     <div className="viewer">

@@ -9,7 +9,7 @@ import { getOC } from 'replicad';
 import type { Contour, Primitive, Pt, Seg } from '../gerber/types';
 import { arcSweep } from '../gerber/gerber';
 import { contourPoints, polygonArea } from '../gerber/geom2d';
-import { arcBand, circleDrawing, contourDrawing, primitiveDrawings, stadium } from './faces';
+import { arcBand, circleDrawing, contourDrawing, primitiveDrawings, primitivePoint, stadium, type Progress } from './faces';
 import { drawingFace, prism } from './occ';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -25,17 +25,20 @@ export interface ChamferStats {
   lofted: number;
   stepped: number;
   failed: number;
+  failedAt?: Pt[];
 }
 
 /**
  * Tools that, cut from a board whose channels have their top at `top`, chamfer the channel rims by `size`.
  * `offset` is the copper grow/shrink applied to the channels.
  */
-export function chamferTools(prims: Primitive[], offset: number, top: number, size: number, stats: ChamferStats): TopoShape[] {
+export function chamferTools(prims: Primitive[], offset: number, top: number, size: number, stats: ChamferStats, progress?: Progress): TopoShape[] {
   const z0 = top - size;
   const grow = size + OVER; // offset at the tool's top, z0 + grow
   const tools: TopoShape[] = [];
-  for (const p of prims) {
+  for (let i = 0; i < prims.length; i++) {
+    const p = prims[i];
+    if (progress && (i % 25 === 0 || i === prims.length - 1)) progress(i + 1, prims.length);
     if (!p.dark) continue; // clear areas are rare in copper; their rims are left unchamfered
     try {
       const pairs = sectionPairs(p, offset, grow);
@@ -48,6 +51,7 @@ export function chamferTools(prims: Primitive[], offset: number, top: number, si
       }
     } catch {
       stats.failed++;
+      (stats.failedAt ??= []).push(primitivePoint(p));
     }
   }
   return tools;

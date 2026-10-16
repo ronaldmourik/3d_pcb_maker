@@ -13,6 +13,14 @@ import { GeometryCache, hashValue } from './cache';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TopoShape = any;
 type Warn = (w: string) => void;
+type Report = (i: Issue) => void;
+
+/** A problem at a specific spot of the board (board coordinates of that copper side). */
+export interface Issue {
+  message: string;
+  side: 'top' | 'bottom';
+  at: Pt;
+}
 
 export type PartId = 'board' | 'topHalf' | 'bottomHalf' | 'dowels' | 'stampTop' | 'stampBottom';
 
@@ -40,6 +48,7 @@ export interface BuildResult {
   dowelDiameter: number;
   /** Stages reused from the geometry cache in this build. */
   cacheHits: number;
+  issues: Issue[];
 }
 
 export const COLORS = {
@@ -74,13 +83,16 @@ export function buildModel(
 ): BuildResult {
   cache.scope(hashValue(input));
   const warnings: string[] = [];
-  /** Run a cached stage; warnings it raised are stored with it and replayed on a cache hit. */
-  const staged = <T>(k: string, make: (warn: Warn) => T): T => {
+  const issues: Issue[] = [];
+  /** Run a cached stage; warnings/issues it raised are stored with it and replayed on a cache hit. */
+  const staged = <T>(k: string, make: (warn: Warn, report: Report) => T): T => {
     const r = cache.get(k, () => {
       const w: string[] = [];
-      return { value: make((m) => w.push(m)), warnings: w };
+      const iss: Issue[] = [];
+      return { value: make((m) => w.push(m), (i) => iss.push(i)), warnings: w, issues: iss };
     });
     warnings.push(...r.warnings);
+    issues.push(...r.issues);
     return r.value;
   };
 
@@ -124,12 +136,14 @@ export function buildModel(
 
   /** Merged copper of one side grown by `offset`, clipped to the outline (shared, do not consume). */
   const copperFace = (side: 'top' | 'bottom', offset: number): TopoShape | null =>
-    staged(key(outlineKey, 'copper', side, offset), (warn) => {
-      log(`Merging ${side} copper (offset ${offset.toFixed(2)} mm)`);
+    staged(key(outlineKey, 'copper', side, offset), (warn, report) => {
+      const label = `Merging ${side} copper${offset ? ` (offset ${offset.toFixed(2)} mm)` : ''}`;
+      log(label);
       const prims = (side === 'top' ? input.top : input.bottom) ?? [];
       const st: FaceStats = { failed: 0 };
-      let f = layerFace(prims, offset, st);
+      let f = layerFace(prims, offset, st, (i, n) => log(`${label} ${i}/${n}`));
       if (st.failed) warn(`${st.failed} copper primitive(s) could not be converted and were skipped.`);
+      for (const at of (st.failedAt ?? []).slice(0, 20)) report({ message: 'Copper shape could not be converted', side, at });
       if (f) {
         f = unify(common(f, outlineFace));
         if (isNullOrEmpty(f)) f = null;
@@ -146,7 +160,7 @@ export function buildModel(
   const mirrorX = <T extends AnyShape>(shape: T): T => shape.mirror('YZ', [cx, 0, 0]) as T;
 
   /** Chamfer the top rim of the recessed channels (before drilling, so holes stay sharp). */
-  const chamferChannels = (board: Shape3D, side: 'top' | 'bottom', top: number, depth: number, warn: Warn): Shape3D => {
+  const chamferChannels = (board: Shape3D, side: 'top' | 'bottom', top: number, depth: number, warn: Warn, report: Report): Shape3D => {
     const size = Math.min(s.channelChamfer, depth - 0.05);
     if (size < s.channelChamfer) warn(`Channel chamfer limited to ${size.toFixed(2)} mm by the channel depth.`);
     if (size <= 0.01) return board;
@@ -154,7 +168,8 @@ export function buildModel(
     const prims = (side === 'top' ? input.top : input.bottom) ?? [];
     const cs: ChamferStats = { lofted: 0, stepped: 0, failed: 0 };
     try {
-      const tools = chamferTools(prims, s.copperOffset, top, size, cs);
+      const tools = chamferTools(prims, s.copperOffset, top, size, cs, (i, n) => log(`Chamfering ${side} channels ${i}/${n}`));
+      for (const at of (cs.failedAt ?? []).slice(0, 20)) report({ message: 'Copper shape could not be chamfered', side, at });
       const chamfered = as3D(cast(cutAll(board.wrapped, tools)));
       if (cs.stepped) warn(`${cs.stepped} irregular copper shape(s) got a stepped chamfer approximation.`);
       if (cs.failed) warn(`${cs.failed} copper shape(s) could not be chamfered.`);
@@ -167,7 +182,7 @@ export function buildModel(
   };
 
   // ---- board / halves ----
-  const buildSlab = (thickness: number, side: 'top' | 'bottom', socketsFace: TopoShape | null, socketDepth: number, warn: Warn) => {
+  const buildSlab = (thickness: number, side: 'top' | 'bottom', socketsFace: TopoShape | null, socketDepth: number, warn: Warn, report: Report) => {
     let board = as3D(prism(outlineFace, 0, thickness));
     let copper: Shape3D | null = null;
     const cf = copperFace(side, s.copperOffset);
@@ -179,7 +194,7 @@ export function buildModel(
           warn(`Trace depth reduced to ${d.toFixed(2)} mm to leave a floor under the channels.`);
         }
         board = board.cut(as3D(prism(cf, thickness - d, d + 1)));
-        if (s.channelChamfer > 0) board = chamferChannels(board, side, thickness, d, warn);
+        if (s.channelChamfer > 0) board = chamferChannels(board, side, thickness, d, warn, report);
       } else {
         copper = as3D(prism(cf, thickness, s.traceHeight));
       }
@@ -197,7 +212,7 @@ export function buildModel(
     const featureH = s.mode === 'recessed' ? s.traceDepth : s.traceHeight;
     const chamfer = s.mode === 'recessed' ? s.channelChamfer : 0;
     const k = key(outlineKey, holesKey, 'slab', thickness, side, s.mode, featureH, chamfer, s.copperOffset, socketsKey, socketDepth);
-    const r = staged(k, (warn) => buildSlab(thickness, side, socketsFace, socketDepth, warn));
+    const r = staged(k, (warn, report) => buildSlab(thickness, side, socketsFace, socketDepth, warn, report));
     return { board: r.board.clone(), copper: r.copper ? r.copper.clone() : null };
   };
 
@@ -344,6 +359,7 @@ export function buildModel(
     dowelLength,
     dowelDiameter: s.dowelDiameter,
     cacheHits: cache.hits,
+    issues,
   };
 }
 

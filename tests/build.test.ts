@@ -4,7 +4,7 @@ import { measureArea, measureVolume } from 'replicad';
 import { fixtureInput, initOC } from './helpers';
 import { parseLayerFile, toBoardInput } from '../src/gerber/loadFiles';
 import { buildModel, type BuildResult } from '../src/geometry/brep';
-import { exportParts, previewStep } from '../src/geometry/output';
+import { exportParts, previewIssueSpots, previewStep } from '../src/geometry/output';
 import { isValid } from '../src/geometry/occ';
 import { defaultSettings, type Settings } from '../src/state/settings';
 
@@ -152,6 +152,20 @@ describe('channel chamfer', () => {
   it('limits the chamfer to the channel depth', () => {
     const r = build({ sides: 'top', mode: 'recessed', traceDepth: 0.3, channelChamfer: 0.5 });
     expect(r.warnings.some((w) => w.includes('limited to 0.25'))).toBe(true);
+  });
+});
+
+describe('issue locations', () => {
+  it('maps board coordinates into the preview layouts', () => {
+    const r = build({ sides: 'both', mode: 'raised' });
+    // Board spans x 100..140 (centre 120), halves are 0.8 mm + 0.4 mm copper.
+    r.issues.push({ message: 't', side: 'top', at: [110, -90] }, { message: 'b', side: 'bottom', at: [110, -90] });
+    const print = previewIssueSpots(r, { layout: 'print', showStamps: false });
+    expect(print[0].at).toEqual([110, -90, expect.closeTo(1.2, 5)]);
+    // Bottom half is mirrored about x=120 and shifted right by width + gap (40 + 8).
+    expect(print[1].at[0]).toBeCloseTo(130 + 48, 5);
+    const asm = previewIssueSpots(r, { layout: 'assembled', showStamps: false });
+    expect(asm[1].at).toEqual([110, -90, expect.closeTo(-1.2, 5)]);
   });
 });
 

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { GeometryClient } from '../geometry/client';
 import type { PartInfo, WorkerResponse } from '../geometry/protocol';
 import type { PartId } from '../geometry/brep';
-import type { ExportFormat, PreviewOptions } from '../geometry/output';
+import type { ExportFormat, IssueSpot, PreviewOptions } from '../geometry/output';
 import { parseRawFiles, readUploads, toBoardInput } from '../gerber/loadFiles';
 import type { LayerRole, ParsedLayer } from '../gerber/types';
 import { defaultSettings, settingsEqual, type Settings } from './settings';
@@ -41,6 +41,9 @@ export function useBoardBuild() {
   const [parts, setParts] = useState<PartInfo[]>([]);
   const [doubleSided, setDoubleSided] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [issues, setIssues] = useState<IssueSpot[]>([]);
+  /** Viewer focus request; `n` changes on every click so the same spot can be focused again. */
+  const [focus, setFocus] = useState<{ at: IssueSpot['at']; n: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [building, setBuilding] = useState(false);
@@ -77,6 +80,7 @@ export function useBoardBuild() {
       setStep(res.step);
       setParts(res.parts);
       setWarnings(res.warnings);
+      setIssues(res.issues);
       setDoubleSided(res.doubleSided);
       setBuildMs(res.ms);
       setCacheHits(res.cacheHits);
@@ -140,6 +144,7 @@ export function useBoardBuild() {
     try {
       const res = await client.request<Extract<WorkerResponse, { type: 'preview' }>>({ type: 'preview', preview: p });
       setStep(res.step);
+      setIssues(res.issues);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -166,6 +171,8 @@ export function useBoardBuild() {
     }
   };
 
+  const focusIssue = (i: IssueSpot) => setFocus((f) => ({ at: i.at, n: (f?.n ?? 0) + 1 }));
+
   const hasStamps = parts.some((p) => p.id.startsWith('stamp'));
   const fitKey = `${applied?.layersVersion ?? 0}:${preview.layout}:${preview.showStamps && hasStamps}:${doubleSided}`;
 
@@ -178,6 +185,9 @@ export function useBoardBuild() {
     step,
     parts,
     warnings,
+    issues,
+    focus,
+    focusIssue,
     error,
     busy,
     building,

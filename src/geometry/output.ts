@@ -92,6 +92,33 @@ export function previewShapes(r: BuildResult, opt: PreviewOptions): ShapeConfig[
   return out;
 }
 
+export interface IssueSpot {
+  message: string;
+  /** Position in preview (STEP) coordinates, on the copper face. */
+  at: [number, number, number];
+}
+
+/** Where each located issue appears in the preview for the given layout. */
+export function previewIssueSpots(r: BuildResult, opt: PreviewOptions): IssueSpot[] {
+  const { minX, maxX } = r.bounds;
+  const W = maxX - minX;
+  const cx = (minX + maxX) / 2;
+  const topZ = (id: PartId) => {
+    const p = r.parts.find((x) => x.id === id);
+    return p ? Math.max(...p.bodies.map((b) => zRange(b.shape)[1])) : 0;
+  };
+  return r.issues.map((i) => {
+    const [x, y] = i.at;
+    if (!r.doubleSided) {
+      // Single-sided boards are printed copper-up; a bottom layer is mirrored.
+      return { message: i.message, at: [i.side === 'bottom' ? 2 * cx - x : x, y, topZ('board')] };
+    }
+    if (i.side === 'top') return { message: i.message, at: [x, y, topZ('topHalf')] };
+    if (opt.layout === 'assembled') return { message: i.message, at: [x, y, -topZ('bottomHalf')] };
+    return { message: i.message, at: [2 * cx - x + W + GAP, y, topZ('bottomHalf')] };
+  });
+}
+
 export function previewStep(r: BuildResult, opt: PreviewOptions): Blob {
   return exportSTEP(previewShapes(r, opt), { unit: 'MM' });
 }

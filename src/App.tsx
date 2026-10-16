@@ -54,14 +54,25 @@ export default function App() {
           <ExportBar parts={b.parts} busy={!!b.busy} onExport={b.exportPart} />
         </div>
         {b.error && <div className="banner error">{b.error}</div>}
-        {b.warnings.length > 0 && (
+        {(b.warnings.length > 0 || b.issues.length > 0) && (
           <div className="banner warn">
             {b.warnings.map((w) => (
               <div key={w}>{w}</div>
             ))}
+            {b.issues.length > 0 && (
+              <ul className="issues">
+                {b.issues.map((i, k) => (
+                  <li key={k}>
+                    <button className="link" onClick={() => b.focusIssue(i)} title="Show in the preview">
+                      {i.message} at ({i.at[0].toFixed(1)}, {i.at[1].toFixed(1)})
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
-        <Viewer step={b.step} fitKey={b.fitKey} busy={!!b.busy || (!b.engineReady && b.layers.length > 0)} busyText={b.busy ?? 'Loading geometry engine…'} />
+        <Viewer step={b.step} fitKey={b.fitKey} focus={b.focus} busy={!!b.busy || (!b.engineReady && b.layers.length > 0)} busyText={b.busy ?? 'Loading geometry engine…'} />
       </main>
     </div>
   );

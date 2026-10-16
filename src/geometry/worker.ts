@@ -5,7 +5,7 @@ import wasmUrl from 'replicad-opencascadejs/wasm?url';
 import { setOC } from 'replicad';
 import { buildModel, disposeBuild, type BuildResult } from './brep';
 import { GeometryCache } from './cache';
-import { exportParts, previewStep } from './output';
+import { exportParts, previewIssueSpots, previewStep } from './output';
 import type { WorkerRequest, WorkerResponse } from './protocol';
 
 declare const self: DedicatedWorkerGlobalScope;
@@ -45,13 +45,14 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
           doubleSided: current.doubleSided,
           ms: Math.round(performance.now() - t0),
           cacheHits: current.cacheHits,
+          issues: previewIssueSpots(current, msg.preview),
         },
         [step],
       );
     } else if (msg.type === 'preview') {
       if (!current) throw new Error('Nothing built yet');
       const step = await stepBuffer(previewStep(current, msg.preview));
-      post({ type: 'preview', id: msg.id, step }, [step]);
+      post({ type: 'preview', id: msg.id, step, issues: previewIssueSpots(current, msg.preview) }, [step]);
     } else if (msg.type === 'export') {
       if (!current) throw new Error('Nothing built yet');
       const f = await exportParts(current, msg.part, msg.format, msg.tolerance, msg.angularTolerance);

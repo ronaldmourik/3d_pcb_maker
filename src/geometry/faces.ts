@@ -121,10 +121,19 @@ export function primitiveDrawings(p: Primitive, offset: number): Drawing[] {
 
 export interface FaceStats {
   failed: number;
+  /** A point of every primitive that could not be converted. */
+  failedAt?: Pt[];
+}
+
+export type Progress = (done: number, total: number) => void;
+
+/** A representative point of a primitive (for locating problems). */
+export function primitivePoint(p: Primitive): Pt {
+  return p.kind === 'circle' ? p.center : p.kind === 'stroke' ? p.from : p.outer.start;
 }
 
 /** Fuse/cut all primitives of a layer in order of polarity into one face set. */
-export function layerFace(prims: Primitive[], offset: number, stats: FaceStats): TopoShape | null {
+export function layerFace(prims: Primitive[], offset: number, stats: FaceStats, progress?: Progress): TopoShape | null {
   let acc: TopoShape | null = null;
   let i = 0;
   while (i < prims.length) {
@@ -135,8 +144,10 @@ export function layerFace(prims: Primitive[], offset: number, stats: FaceStats):
         for (const d of primitiveDrawings(prims[i], dark ? offset : -offset)) faces.push(drawingFace(d));
       } catch {
         stats.failed++;
+        (stats.failedAt ??= []).push(primitivePoint(prims[i]));
       }
       i++;
+      if (progress && (i % 50 === 0 || i === prims.length)) progress(i, prims.length);
     }
     if (!faces.length) continue;
     if (dark) acc = fuseAll(acc ? [acc, ...faces] : faces);
