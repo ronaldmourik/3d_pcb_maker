@@ -1,12 +1,14 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { unzipSync, strFromU8 } from 'fflate';
-import { measureArea, measureVolume } from 'replicad';
+import { cast, measureArea, measureVolume } from 'replicad';
 import { fixtureInput, initOC } from './helpers';
 import { identifyRole, parseLayerFile, toBoardInput } from '../src/gerber/loadFiles';
 import { patternBounds } from '../src/export/paths2d';
 import { buildModel, type BuildResult } from '../src/geometry/brep';
 import { exportParts, previewIssueSpots, previewStep } from '../src/geometry/output';
 import { isValid } from '../src/geometry/occ';
+import { layerFace } from '../src/geometry/faces';
+import { pourArea, pourGerber } from './pourFixture';
 import { defaultSettings, type Settings } from '../src/state/settings';
 
 beforeAll(initOC);
@@ -228,6 +230,30 @@ describe('printability check', () => {
   it('warns about a thin channel floor', () => {
     const r = build({ sides: 'top', mode: 'recessed', boardThickness: 0.6, traceDepth: 0.4 });
     expect(r.warnings.some((w) => w.includes('material under the channels'))).toBe(true);
+  });
+});
+
+describe('copper pours', () => {
+  const pour = () => parseLayerFile('pour-F_Cu.gbr', pourGerber());
+
+  it('splits fractured regions into an outline with holes', () => {
+    const regions = pour().primitives.filter((p) => p.kind === 'contour');
+    expect(regions.map((p) => (p.kind === 'contour' ? (p.holes?.length ?? 0) : 0))).toEqual([24, 0]);
+  });
+
+  it('merges a pour with thermals and a knockout into a valid face of the right area', () => {
+    const f = layerFace(pour().primitives, 0, { failed: 0 });
+    expect(isValid(f)).toBe(true);
+    expect(Math.abs(measureArea(cast(f) as never) - pourArea()) / pourArea()).toBeLessThan(0.002);
+  });
+
+  it('builds pours in both modes and reports the pour it cannot bevel', () => {
+    const input = toBoardInput([pour()]);
+    for (const mode of ['raised', 'recessed'] as const) {
+      const r = buildModel(input, { ...defaultSettings, sides: 'top', mode, channelChamfer: 0.2 });
+      for (const b of r.parts[0].bodies) expect(isValid(b.shape.wrapped)).toBe(true);
+      expect(r.issues.some((i) => /without (edge|channel) chamfer/.test(i.message))).toBe(true);
+    }
   });
 });
 

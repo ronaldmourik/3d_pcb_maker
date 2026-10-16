@@ -26,6 +26,8 @@ export interface ChamferStats {
   stepped: number;
   failed: number;
   failedAt?: Pt[];
+  /** Regions with holes (copper pours) that were left without a chamfer. */
+  skippedAt?: Pt[];
 }
 
 /**
@@ -41,6 +43,10 @@ export function chamferTools(prims: Primitive[], offset: number, top: number, si
     if (progress && (i % 25 === 0 || i === prims.length - 1)) progress(i + 1, prims.length);
     if (!p.dark) continue; // clear areas are rare in copper; their rims are left unchamfered
     try {
+      if (p.kind === 'contour' && p.holes?.length) {
+        (stats.skippedAt ??= []).push(primitivePoint(p));
+        continue;
+      }
       const pairs = sectionPairs(p, offset, grow);
       if (pairs) {
         for (const [a, b] of pairs) tools.push(loft(a, b, z0, z0 + grow));
@@ -109,17 +115,41 @@ export function edgeChamferTools(loops: PathSeg[][], top: number, size: number, 
   const addVertex = (q: Pt) => {
     if (!vertices.some((v) => Math.hypot(v[0] - q[0], v[1] - q[1]) < 1e-6)) vertices.push(q);
   };
+  // Loops are oriented with the material on the left. A vertex needs its own cone only where the material
+  // corner is convex (a left turn); at concave corners the two neighbouring wedges already cover everything.
+  for (const loop of loops)
+    loop.forEach((sg, i) => {
+      const prev = loop[(i - 1 + loop.length) % loop.length];
+      const t1 = tangent(prev, 'end');
+      const t2 = tangent(sg, 'start');
+      if (t1[0] * t2[1] - t1[1] * t2[0] > 1e-9) addVertex(sg.a);
+    });
   const segs = loops.flat();
   segs.forEach((sg, i) => {
     if (progress && (i % 25 === 0 || i === segs.length - 1)) progress(i + 1, segs.length);
-    addVertex(sg.a);
-    addVertex(sg.b);
     const g = sg.type === 'arc' ? arcAngles(sg.a, sg.m, sg.b) : null;
     if (g) tools.push(arcWedge(g.c, g.r, g.start, g.sweep, z0, grow));
     else if (Math.hypot(sg.b[0] - sg.a[0], sg.b[1] - sg.a[1]) > EPS) tools.push(lineWedge(sg.a, sg.b, z0, grow));
   });
   for (const v of vertices) tools.push(revolveProfile([[0, -FLAT], [FLAT, -FLAT], [grow + FLAT, grow], [0, grow]], v, 0, 2 * Math.PI, z0));
   return tools;
+}
+
+/** Unit tangent of a segment at its start or end, in the direction of travel. */
+function tangent(s: PathSeg, at: 'start' | 'end'): Pt {
+  let v: Pt;
+  if (s.type === 'line') v = [s.b[0] - s.a[0], s.b[1] - s.a[1]];
+  else {
+    const g = arcAngles(s.a, s.m, s.b);
+    if (!g) v = [s.b[0] - s.a[0], s.b[1] - s.a[1]];
+    else {
+      const p = at === 'start' ? s.a : s.b;
+      const r: Pt = [p[0] - g.c[0], p[1] - g.c[1]];
+      v = g.sweep > 0 ? [-r[1], r[0]] : [r[1], -r[0]];
+    }
+  }
+  const l = Math.hypot(v[0], v[1]) || 1;
+  return [v[0] / l, v[1] / l];
 }
 
 /**

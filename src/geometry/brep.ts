@@ -74,6 +74,8 @@ const PART_LABELS: Record<PartId, string> = {
 };
 
 const as3D = (s: AnyShape) => s as Shape3D;
+/** Copper areas with more boundary edges than this (large pours) are not bevelled: too slow. */
+const MAX_CHAMFER_EDGES = 400;
 const key = (...parts: unknown[]) => parts.map((p) => (typeof p === 'number' ? String(+p.toFixed(5)) : String(p))).join('|');
 
 /** Dispose all bodies of a build (they are clones, never shared with the cache). */
@@ -177,6 +179,7 @@ export function buildModel(
     try {
       const tools = chamferTools(prims, s.copperOffset, top, size, cs, (i, n) => log(`Chamfering ${side} channels ${i}/${n}`));
       for (const at of (cs.failedAt ?? []).slice(0, 20)) report({ message: 'Copper shape could not be chamfered', side, at });
+      for (const at of cs.skippedAt ?? []) report({ message: 'Copper pour left without channel chamfer', side, at });
       const chamfered = as3D(cast(cutAll(board.wrapped, tools)));
       if (cs.stepped) warn(`${cs.stepped} irregular copper shape(s) got a stepped chamfer approximation.`);
       if (cs.failed) warn(`${cs.failed} copper shape(s) could not be chamfered.`);
@@ -200,23 +203,23 @@ export function buildModel(
       const solids = islands.map((face, i) => {
         log(`Chamfering ${side} traces ${i + 1}/${islands.length}`);
         const island = prism(face, top - s.traceHeight, s.traceHeight).wrapped;
-        const tools = edgeChamferTools(faceLoops(face), top, size);
-        // One tool at a time is the most reliable (and multi-tool cuts can silently do nothing);
-        // fall back to a single cut with the fused tools, and finally leave the island sharp.
-        const attempts = [
-          () => tools.reduce((cur, t) => cutAll(cur, [t]), island),
-          () => cutAll(island, [fuseAll(tools)]),
-        ];
-        for (const attempt of attempts) {
-          try {
-            const r = attempt();
-            if (isValid(r)) return r;
-          } catch {
-            /* next attempt */
-          }
+        const loops = faceLoops(face);
+        const centre = (): Pt => {
+          const [min, max] = cast(face).boundingBox.bounds;
+          return [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2];
+        };
+        const edges = loops.reduce((n, l) => n + l.length, 0);
+        if (edges > MAX_CHAMFER_EDGES) {
+          report({ message: `Large copper area (${edges} edges) left without edge chamfer`, side, at: centre() });
+          return island;
         }
-        const [min, max] = cast(face).boundingBox.bounds;
-        report({ message: 'Copper area left without edge chamfer', side, at: [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2] });
+        try {
+          const r = cutChamferTools(island, loops, top, size);
+          if (isValid(r)) return r;
+        } catch {
+          /* report below */
+        }
+        report({ message: 'Copper area left without edge chamfer', side, at: centre() });
         return island;
       });
       const chamfered = as3D(cast(solids.length === 1 ? solids[0] : makeCompound(solids.map((x) => cast(x))).wrapped));
@@ -526,4 +529,25 @@ function faceList(shape: TopoShape): TopoShape[] {
   for (; exp.More(); exp.Next()) out.push(OC.TopoDS.Face(exp.Current()));
   exp.delete();
   return out;
+}
+
+/**
+ * Cut the edge chamfer tools of `loops` from `solid`. Tools of neighbouring edges are fused in small
+ * batches (one cut per batch keeps big pours fast); a batch that fails is retried one tool at a time.
+ * Never pass several tools to one cut: OpenCascade can silently do nothing then.
+ */
+function cutChamferTools(solid: TopoShape, loops: PathSeg[][], top: number, size: number, batch = 16): TopoShape {
+  let cur = solid;
+  for (const loop of loops) {
+    const tools = edgeChamferTools([loop], top, size);
+    for (let i = 0; i < tools.length; i += batch) {
+      const chunk = tools.slice(i, i + batch);
+      try {
+        cur = cutAll(cur, [fuseAll(chunk)]);
+      } catch {
+        for (const t of chunk) cur = cutAll(cur, [t]);
+      }
+    }
+  }
+  return cur;
 }

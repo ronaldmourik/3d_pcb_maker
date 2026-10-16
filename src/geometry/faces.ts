@@ -1,8 +1,9 @@
 // Converts exact 2D primitives into OpenCascade planar faces (arcs stay arcs).
-import { draw, drawCircle, type Drawing } from 'replicad';
+import { draw, drawCircle, makeFace, type Drawing, type Wire } from 'replicad';
 import type { Contour, Drill, Primitive, Pt } from '../gerber/types';
 import { arcSweep, samePt } from '../gerber/gerber';
-import { cutAll, drawingFace, fuseAll, unify } from './occ';
+import { cutAll, drawingFace, facesUp, fuseAll, unify } from './occ';
+import { contourPoints, polygonArea } from '../gerber/geom2d';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TopoShape = any;
@@ -143,7 +144,7 @@ export function layerFace(prims: Primitive[], offset: number, stats: FaceStats, 
     while (i < prims.length && prims[i].dark === dark) {
       const o = dark ? offset : -offset;
       try {
-        for (const d of primitiveDrawings(prims[i], o)) faces.push(drawingFace(d));
+        faces.push(...primitiveFaces(prims[i], o));
       } catch {
         // A shape shrunk to nothing is expected, not a failure.
         if (o >= 0) {
@@ -187,4 +188,27 @@ export function contourFace(outer: Contour, holes: Contour[]): TopoShape {
 export function circlesFace(centers: Pt[], r: number): TopoShape | null {
   const faces = centers.map((c) => drawingFace(circleDrawing(c, r)));
   return faces.length ? fuseAll(faces) : null;
+}
+
+/** Faces of one primitive. Regions with many holes (pours) are built straight from wires: much faster. */
+export function primitiveFaces(p: Primitive, offset: number): TopoShape[] {
+  if (p.kind === 'contour' && p.holes?.length && Math.abs(offset) <= EPS) {
+    const wire = (c: Contour, ccw: boolean) => {
+      const isCcw = polygonArea(contourPoints(c)) > 0;
+      return (contourDrawing(isCcw === ccw ? c : reverseContour(c)).sketchOnPlane('XY') as unknown as { wire: Wire }).wire;
+    };
+    return [facesUp(makeFace(wire(p.outer, true), p.holes.map((h) => wire(h, false))).wrapped)];
+  }
+  return primitiveDrawings(p, offset).map(drawingFace);
+}
+
+export function reverseContour(c: Contour): Contour {
+  const pts: Pt[] = [c.start, ...c.segs.map((s) => s.end)];
+  const segs: Contour['segs'] = [];
+  for (let i = c.segs.length - 1; i >= 0; i--) {
+    const s = c.segs[i];
+    const end = pts[i];
+    segs.push(s.type === 'line' ? { type: 'line', end } : { type: 'arc', end, center: s.center, cw: !s.cw });
+  }
+  return { start: pts[pts.length - 1], segs };
 }

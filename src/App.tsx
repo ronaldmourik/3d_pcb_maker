@@ -4,6 +4,7 @@ import { SettingsPanel } from './ui/SettingsPanel';
 import { Viewer } from './ui/Viewer';
 import { ExportBar } from './ui/ExportBar';
 import { useBoardBuild } from './state/useBoardBuild';
+import { IssueList } from './ui/IssueList';
 
 export default function App() {
   const b = useBoardBuild();
@@ -60,17 +61,7 @@ export default function App() {
             {b.warnings.map((w) => (
               <div key={w}>{w}</div>
             ))}
-            {b.issues.length > 0 && (
-              <ul className="issues">
-                {b.issues.map((i, k) => (
-                  <li key={k}>
-                    <button className="link" onClick={() => b.focusIssue(i)} title="Show in the preview">
-                      {i.message} at ({(i.at[0] + 0).toFixed(1)}, {(i.at[1] + 0).toFixed(1)})
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <IssueList issues={b.issues} onFocus={b.focusIssue} />
           </div>
         )}
         <Viewer step={b.step} fitKey={b.fitKey} focus={b.focus} busy={!!b.busy || (!b.engineReady && b.layers.length > 0)} busyText={b.busy ?? 'Loading geometry engine…'} />

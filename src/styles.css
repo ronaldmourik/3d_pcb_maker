@@ -81,3 +81,5 @@ main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 
 .issues { margin: 4px 0 0; padding-left: 16px; }
 button.link { border: none; background: none; padding: 0; color: #975a16; text-decoration: underline; cursor: pointer; font-size: 12px; }
+.banner.warn { max-height: 28vh; overflow-y: auto; }
+.issue-pos { color: #7b8794; font-size: 11px; }

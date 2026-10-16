@@ -15,19 +15,45 @@ function explore(shape: TopoShape, kind: 'TopAbs_FACE' | 'TopAbs_WIRE' | 'TopAbs
   exp.delete();
 }
 
-/** All boundary loops (outer + holes) of every face in `shape`, as ordered segments. */
+/**
+ * All boundary loops (outer + holes) of every face in `shape`, as ordered segments, oriented so the face
+ * lies to the left of the direction of travel (outer boundaries counter-clockwise, holes clockwise).
+ */
 export function faceLoops(shape: TopoShape | null): PathSeg[][] {
   if (!shape) return [];
   const OC = getOC() as any;
   const loops: PathSeg[][] = [];
-  explore(shape, 'TopAbs_FACE', (face) =>
+  explore(shape, 'TopAbs_FACE', (face) => {
+    const own: PathSeg[][] = [];
     explore(face, 'TopAbs_WIRE', (wire) => {
       const segs: PathSeg[] = [];
       explore(wire, 'TopAbs_EDGE', (edge) => segs.push(...edgeSegs(cast(OC.TopoDS.Edge(edge)))));
-      loops.push(chain(segs));
-    }),
-  );
+      own.push(chain(segs));
+    });
+    const areas = own.map(loopArea);
+    const outer = areas.reduce((best, a, i) => (Math.abs(a) > Math.abs(areas[best]) ? i : best), 0);
+    own.forEach((l, i) => loops.push((i === outer) === areas[i] > 0 ? l : reverseLoop(l)));
+  });
   return loops;
+}
+
+/** Signed area (positive = counter-clockwise), arcs approximated through their mid points. */
+export function loopArea(loop: PathSeg[]): number {
+  const pts: P2[] = [];
+  for (const s of loop) {
+    pts.push(s.a);
+    if (s.type === 'arc') pts.push(s.m);
+  }
+  let a = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const q = pts[(i + 1) % pts.length];
+    a += pts[i][0] * q[1] - q[0] * pts[i][1];
+  }
+  return a / 2;
+}
+
+function reverseLoop(loop: PathSeg[]): PathSeg[] {
+  return loop.map(reverse).reverse();
 }
 
 function edgeSegs(e: any): PathSeg[] {

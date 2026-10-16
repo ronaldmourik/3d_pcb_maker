@@ -1,6 +1,7 @@
 // Gerber RS-274X parser producing exact primitives (arcs are kept as arcs).
 import type { Contour, Primitive, Pt, Seg } from './types';
 import { evalMacroExpr } from './macroExpr';
+import { splitFracturedContour } from './regions';
 
 interface Format {
   intDigits: number;
@@ -328,7 +329,11 @@ class GerberParser {
   private endRegion() {
     if (!this.region) return;
     this.closeContour();
-    for (const c of this.region.contours) this.emit({ kind: 'contour', dark: this.dark, outer: c });
+    for (const c of this.region.contours) {
+      const parts = splitFracturedContour(c);
+      if (parts) for (const r of parts) this.emit({ kind: 'contour', dark: this.dark, outer: r.outer, holes: r.holes.length ? r.holes : undefined });
+      else this.emit({ kind: 'contour', dark: this.dark, outer: c });
+    }
     this.region = null;
   }
 
