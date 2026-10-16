@@ -6,12 +6,22 @@ import { ExportBar } from './ui/ExportBar';
 import { useBoardBuild } from './state/useBoardBuild';
 import { IssueList } from './ui/IssueList';
 import { PresetBar } from './ui/PresetBar';
+import { ViewBar } from './ui/ViewBar';
+import type { PreviewCategory } from './geometry/output';
 
 export default function App() {
   const b = useBoardBuild();
   const { preview } = b;
   const problems = b.issues.filter((i) => i.level !== 'info');
   const info = b.issues.filter((i) => i.level === 'info');
+  const ids = b.parts.map((p) => p.id);
+  const available: PreviewCategory[] = [
+    'board',
+    ...(b.draft.mode !== 'recessed' ? (['copper'] as const) : []),
+    ...(ids.some((i) => i.startsWith('stamp')) ? (['stamp'] as const) : []),
+    ...(ids.includes('dowels') ? (['dowel'] as const) : []),
+    ...(problems.length ? (['issue'] as const) : []),
+  ];
 
   return (
     <div className="app">
@@ -59,6 +69,17 @@ export default function App() {
           {b.busy && b.building && <button onClick={b.cancel}>Cancel</button>}
           <ExportBar parts={b.parts} copperSides={b.copperSides} busy={!!b.busy} onExport={b.exportPart} />
         </div>
+        {b.step && (
+          <ViewBar
+            available={available}
+            hidden={b.hidden}
+            onHidden={b.setHidden}
+            overlay={!!preview.overlay}
+            onOverlay={(on) => b.changePreview({ ...preview, overlay: on })}
+            section={b.section}
+            onSection={b.setSection}
+          />
+        )}
         {b.error && <div className="banner error">{b.error}</div>}
         {(b.warnings.length > 0 || problems.length > 0) && (
           <div className="banner warn">
@@ -73,7 +94,7 @@ export default function App() {
             <IssueList issues={info} onFocus={b.focusIssue} plain />
           </div>
         )}
-        <Viewer step={b.step} fitKey={b.fitKey} focus={b.focus} busy={!!b.busy || (!b.engineReady && b.layers.length > 0)} busyText={b.busy ?? 'Loading geometry engine…'} />
+        <Viewer step={b.step} fitKey={b.fitKey} focus={b.focus} hidden={b.hidden} section={b.section} busy={!!b.busy || (!b.engineReady && b.layers.length > 0)} busyText={b.busy ?? 'Loading geometry engine…'} />
       </main>
     </div>
   );

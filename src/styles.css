@@ -89,3 +89,7 @@ button.link { border: none; background: none; padding: 0; color: #975a16; text-d
 .preset-bar select { flex: 1; }
 .preset-bar form { display: flex; gap: 6px; flex: 1; }
 .preset-bar input { flex: 1; border: 1px solid var(--border); border-radius: 5px; padding: 3px 6px; }
+.view-bar { display: flex; align-items: center; gap: 10px; padding: 4px 12px; background: #f7f9fb; border-bottom: 1px solid var(--border); font-size: 12px; flex-wrap: wrap; }
+.view-bar .check { margin: 0; }
+.view-label { color: #7b8794; font-weight: 600; }
+.view-bar input[type=range] { width: 160px; }

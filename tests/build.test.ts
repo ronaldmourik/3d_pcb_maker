@@ -5,7 +5,7 @@ import { fixtureInput, initOC } from './helpers';
 import { identifyRole, parseLayerFile, toBoardInput } from '../src/gerber/loadFiles';
 import { patternBounds } from '../src/export/paths2d';
 import { buildModel, type BuildResult } from '../src/geometry/brep';
-import { exportParts, previewIssueSpots, previewStep } from '../src/geometry/output';
+import { exportParts, previewIssueSpots, previewShapes, previewStep } from '../src/geometry/output';
 import { isValid } from '../src/geometry/occ';
 import { layerFace } from '../src/geometry/faces';
 import { pourArea, pourGerber } from './pourFixture';
@@ -388,6 +388,20 @@ describe('copper cut patterns (SVG / DXF)', () => {
     const slotX = (p: NonNullable<typeof r.cutPatterns.top>) => p.slots[0][0].a[0];
     expect(slotX(r.cutPatterns.top!)).toBeGreaterThan(137);
     expect(slotX(r.cutPatterns.bottom!)).toBeLessThan(103);
+  });
+});
+
+describe('preview bodies', () => {
+  it('tags every preview body with a category and adds the Gerber overlay on request', () => {
+    const r = build({ sides: 'both', mode: 'raised', stampEnabled: true });
+    const plain = previewShapes(r, { layout: 'print', showStamps: true });
+    const cats = new Set(plain.map((s) => s.name.split('|')[0]));
+    expect([...cats].sort()).toEqual(['board', 'copper', 'dowel', 'stamp']);
+    expect(plain.some((s) => s.name.startsWith('overlay|'))).toBe(false);
+    const withOverlay = previewShapes(r, { layout: 'print', showStamps: true, overlay: true }).filter((s) => s.name.startsWith('overlay|'));
+    expect(withOverlay).toHaveLength(2);
+    // The overlay sits just above the copper of its half.
+    for (const o of withOverlay) expect(o.shape.boundingBox.bounds[0][2]).toBeGreaterThan(1.2);
   });
 });
 

@@ -59,7 +59,12 @@ export interface BuildResult {
   issues: Issue[];
   /** Copper cut patterns per side, oriented as on the printed part (copper face up). */
   cutPatterns: Partial<Record<'top' | 'bottom', CutPattern>>;
+  /** Thin outline of the original Gerber copper per side (board coordinates, z 0..OVERLAY_H), preview only. */
+  overlays: Partial<Record<'top' | 'bottom', Shape3D>>;
 }
+
+export const OVERLAY_H = 0.05;
+const OVERLAY_W = 0.25;
 
 export const COLORS = {
   board: '#ece8dc',
@@ -68,6 +73,7 @@ export const COLORS = {
   dowel: '#8a8a8a',
   conductive: '#3a3a3a',
   issue: '#e53e3e',
+  overlay: '#22c55e',
 };
 
 const PART_LABELS: Record<PartId, string> = {
@@ -87,6 +93,7 @@ const key = (...parts: unknown[]) => parts.map((p) => (typeof p === 'number' ? S
 /** Dispose all bodies of a build (they are clones, never shared with the cache). */
 export function disposeBuild(r: BuildResult) {
   for (const p of r.parts) for (const b of p.bodies) b.shape.delete();
+  for (const o of Object.values(r.overlays)) o?.delete();
 }
 
 export function buildModel(
@@ -446,6 +453,19 @@ export function buildModel(
     }
   }
 
+  // ---- Gerber overlay (preview only): a thin ring along the original copper outline ----
+  const overlays: Partial<Record<'top' | 'bottom', Shape3D>> = {};
+  for (const side of (doubleSided ? ['top', 'bottom'] : [sides]) as ('top' | 'bottom')[]) {
+    const ring = staged(key(outlineKey, 'overlay', side), () => {
+      const full = copperFace(side, 0);
+      const inner = copperFace(side, -OVERLAY_W);
+      if (!full) return null;
+      const r = inner ? cutAll(full, [inner]) : full;
+      return isNullOrEmpty(r) ? null : as3D(prism(r, 0, OVERLAY_H));
+    });
+    if (ring) overlays[side] = ring.clone();
+  }
+
   // ---- press stamps ----
   if (s.stampEnabled && !conductive) {
     const stampSides: ('top' | 'bottom')[] = doubleSided ? ['top', 'bottom'] : [sides as 'top' | 'bottom'];
@@ -534,6 +554,7 @@ export function buildModel(
     cacheHits: cache.hits,
     issues,
     cutPatterns,
+    overlays,
   };
 }
 

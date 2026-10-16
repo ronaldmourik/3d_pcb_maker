@@ -2,7 +2,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { GeometryClient } from '../geometry/client';
 import type { PartInfo, WorkerResponse } from '../geometry/protocol';
-import type { ExportFormat, ExportTarget, IssueSpot, PreviewOptions } from '../geometry/output';
+import type { ExportFormat, ExportTarget, IssueSpot, PreviewCategory, PreviewOptions } from '../geometry/output';
+import type { SectionView } from '../ui/Viewer';
 import { parseRawFiles, readUploads, toBoardInput } from '../gerber/loadFiles';
 import type { LayerRole, ParsedLayer } from '../gerber/types';
 import { settingsEqual, type Settings } from './settings';
@@ -39,6 +40,9 @@ export function useBoardBuild() {
   const [userPresets, setUserPresets] = useState<Preset[]>(stored.presets);
   const [applied, setApplied] = useState<Applied | null>(null);
   const [preview, setPreview] = useState<PreviewOptions>(stored.preview ?? { layout: 'print', showStamps: true });
+  // Viewer-only options (no rebuild): hidden body categories and a section plane.
+  const [hidden, setHidden] = useState<PreviewCategory[]>([]);
+  const [section, setSection] = useState<SectionView | null>(null);
   const [step, setStep] = useState<ArrayBuffer | null>(null);
   const [parts, setParts] = useState<PartInfo[]>([]);
   const [copperSides, setCopperSides] = useState<('top' | 'bottom')[]>([]);
@@ -207,6 +211,10 @@ export function useBoardBuild() {
     savePreset,
     deletePreset,
     preview,
+    hidden,
+    setHidden,
+    section,
+    setSection,
     step,
     parts,
     copperSides,

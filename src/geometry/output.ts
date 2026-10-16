@@ -2,7 +2,7 @@
 import { exportSTEP, makeCylinder, type AnyShape } from 'replicad';
 import { zipSync } from 'fflate';
 import type { BuildResult, Part, PartId } from './brep';
-import { COLORS } from './brep';
+import { COLORS, OVERLAY_H } from './brep';
 import { tessellate } from '../export/mesh';
 import { writeStl } from '../export/stl';
 import { write3mf } from '../export/threemf';
@@ -19,7 +19,23 @@ export type PreviewLayout = 'print' | 'assembled';
 export interface PreviewOptions {
   layout: PreviewLayout;
   showStamps: boolean;
+  /** Show the original Gerber copper outline on top of the parts. */
+  overlay?: boolean;
 }
+
+/** Category tag in preview body names (`category|name`), used by the viewer's visibility toggles. */
+export type PreviewCategory = 'board' | 'copper' | 'stamp' | 'dowel' | 'issue' | 'overlay';
+
+export function bodyCategory(name: string, color: string): PreviewCategory {
+  if (color === COLORS.copper || color === COLORS.conductive) return 'copper';
+  if (color === COLORS.stamp) return 'stamp';
+  if (color === COLORS.dowel) return 'dowel';
+  if (color === COLORS.issue) return 'issue';
+  if (color === COLORS.overlay) return 'overlay';
+  return name.toLowerCase().includes('dowel') ? 'dowel' : 'board';
+}
+
+const tagged = (name: string, color: string) => `${bodyCategory(name, color)}|${name}`;
 
 interface ShapeConfig {
   shape: AnyShape;
@@ -48,7 +64,7 @@ export function previewShapes(r: BuildResult, opt: PreviewOptions): ShapeConfig[
   const out: ShapeConfig[] = [];
   const add = (p: Part | undefined, f: (s: AnyShape) => AnyShape) => {
     // replicad transforms consume their input, so always work on a clone.
-    if (p) for (const b of p.bodies) out.push({ shape: f(b.shape.clone()), name: b.name, color: b.color });
+    if (p) for (const b of p.bodies) out.push({ shape: f(b.shape.clone()), name: tagged(b.name, b.color), color: b.color });
   };
   const stampTop = opt.showStamps ? part('stampTop') : undefined;
   const stampBottom = opt.showStamps ? part('stampBottom') : undefined;
@@ -61,7 +77,7 @@ export function previewShapes(r: BuildResult, opt: PreviewOptions): ShapeConfig[
     const singleBottom = !r.doubleSided && !!stampBottom;
     add(stampTop, (s) => s.translate(0, -(H + GAP), 0));
     add(stampBottom, (s) => s.translate(singleBottom ? 0 : W + GAP, -(H + GAP), 0));
-    out.push(...issueMarkers(r, opt));
+    out.push(...issueMarkers(r, opt), ...overlayBodies(r, opt));
     return out;
   }
 
@@ -82,7 +98,7 @@ export function previewShapes(r: BuildResult, opt: PreviewOptions): ShapeConfig[
     if (r.dowelPositions.length) {
       const rad = r.dowelDiameter / 2;
       for (const p of r.dowelPositions) {
-        out.push({ shape: makeCylinder(rad, r.dowelLength, [p[0], p[1], -r.dowelLength / 2]), name: 'Dowel', color: COLORS.dowel });
+        out.push({ shape: makeCylinder(rad, r.dowelLength, [p[0], p[1], -r.dowelLength / 2]), name: tagged('Dowel', COLORS.dowel), color: COLORS.dowel });
       }
     }
   }
@@ -96,7 +112,33 @@ export function previewShapes(r: BuildResult, opt: PreviewOptions): ShapeConfig[
       const [, z1] = zRange(s);
       return s.translateZ(bottom - GAP - z1);
     });
-  out.push(...issueMarkers(r, opt));
+  out.push(...issueMarkers(r, opt), ...overlayBodies(r, opt));
+  return out;
+}
+
+/** The original Gerber copper outline placed on top of its part, like the issue markers. */
+function overlayBodies(r: BuildResult, opt: PreviewOptions): ShapeConfig[] {
+  if (!opt.overlay) return [];
+  const { minX, maxX } = r.bounds;
+  const W = maxX - minX;
+  const cx = (minX + maxX) / 2;
+  const topZ = (id: PartId) => {
+    const p = r.parts.find((x) => x.id === id);
+    return p ? Math.max(...p.bodies.map((b) => zRange(b.shape)[1])) : 0;
+  };
+  const out: ShapeConfig[] = [];
+  for (const side of ['top', 'bottom'] as const) {
+    const o = r.overlays[side];
+    if (!o) continue;
+    let s: AnyShape = o.clone();
+    if (!r.doubleSided) {
+      if (side === 'bottom') s = s.mirror('YZ', [cx, 0, 0]);
+      s = s.translateZ(topZ('board') + 0.01);
+    } else if (side === 'top') s = s.translateZ(topZ('topHalf') + 0.01);
+    else if (opt.layout === 'assembled') s = s.translateZ(-topZ('bottomHalf') - 0.01 - OVERLAY_H);
+    else s = s.mirror('YZ', [cx, 0, 0]).translate(W + GAP, 0, topZ('bottomHalf') + 0.01);
+    out.push({ shape: s, name: tagged(`Gerber ${side}`, COLORS.overlay), color: COLORS.overlay });
+  }
   return out;
 }
 
@@ -136,7 +178,7 @@ function issueMarkers(r: BuildResult, opt: PreviewOptions): ShapeConfig[] {
     .map((i) => {
     const up = i.at[2] >= 0 ? 1 : -1;
     const base: [number, number, number] = [i.at[0], i.at[1], up > 0 ? i.at[2] : i.at[2] - 1.5];
-    return { shape: makeCylinder(0.25, 1.5, base), name: `Issue: ${i.message}`, color: COLORS.issue };
+    return { shape: makeCylinder(0.25, 1.5, base), name: tagged(`Issue: ${i.message}`, COLORS.issue), color: COLORS.issue };
   });
 }
 

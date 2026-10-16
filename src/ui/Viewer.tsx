@@ -1,6 +1,15 @@
 // STEP preview using Online3DViewer: it loads the generated STEP file itself.
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useRef } from 'react';
 import * as OV from 'online-3d-viewer';
+import { Plane, Vector3 } from 'three';
+import type { PreviewCategory } from '../geometry/output';
+
+export interface SectionView {
+  axis: 'x' | 'y';
+  /** 0..1 across the model. */
+  t: number;
+}
 
 interface Props {
   step: ArrayBuffer | null;
@@ -10,6 +19,8 @@ interface Props {
   busyText?: string;
   /** Zoom to a point (preview coordinates); `n` changes per request. */
   focus?: { at: [number, number, number]; n: number } | null;
+  hidden?: PreviewCategory[];
+  section?: SectionView | null;
 }
 
 interface LoadJob {
@@ -17,7 +28,9 @@ interface LoadJob {
   fitKey: string;
 }
 
-export function Viewer({ step, fitKey, busy, busyText, focus }: Props) {
+export function Viewer({ step, fitKey, busy, busyText, focus, hidden = [], section = null }: Props) {
+  const viewRef = useRef({ hidden, section });
+  viewRef.current = { hidden, section };
   const host = useRef<HTMLDivElement>(null);
   const viewer = useRef<OV.EmbeddedViewer | null>(null);
   const fitKeyRef = useRef(fitKey);
@@ -64,6 +77,7 @@ export function Viewer({ step, fitKey, busy, busyText, focus }: Props) {
           fitPending.current = false;
           fitTopView(v);
         }
+        applyView(v, viewRef.current.hidden, viewRef.current.section);
         finished();
       },
       onModelLoadFailed: finished,
@@ -85,6 +99,11 @@ export function Viewer({ step, fitKey, busy, busyText, focus }: Props) {
   useEffect(() => {
     if (step) start({ step, fitKey: fitKeyRef.current });
   }, [step]);
+
+  useEffect(() => {
+    const v = viewer.current;
+    if (v?.model) applyView(v, hidden, section);
+  }, [hidden.join(), section?.axis, section?.t]);
 
   useEffect(() => {
     const v = viewer.current;
@@ -124,4 +143,36 @@ function fitTopView(v: OV.EmbeddedViewer) {
   viewer.SetUpVector(OV.Direction.Z, false);
   viewer.SetCamera(new OV.Camera(new OV.Coord3D(c.x, c.y - 1.2, c.z + 2), new OV.Coord3D(c.x, c.y, c.z), new OV.Coord3D(0, 0, 1), 45));
   viewer.FitSphereToWindow(sphere, false);
+}
+
+/** Category tag from the STEP body name ("category|name"), as written by previewShapes. */
+function categoryOf(userData: any): string | null {
+  const inst = userData?.originalMeshInstance;
+  for (const n of [inst?.node?.GetName?.(), inst?.mesh?.GetName?.()]) {
+    if (typeof n === 'string' && n.includes('|')) return n.split('|')[0];
+  }
+  return null;
+}
+
+/** Body visibility and the section (clip) plane. */
+function applyView(v: OV.EmbeddedViewer, hidden: PreviewCategory[], section: SectionView | null) {
+  const viewer = v.GetViewer() as any;
+  viewer.SetMeshesVisibility((ud: unknown) => {
+    const c = categoryOf(ud);
+    return !c || !hidden.includes(c as PreviewCategory);
+  });
+  const renderer = viewer.renderer;
+  if (!renderer) return;
+  if (!section) {
+    renderer.clippingPlanes = [];
+  } else {
+    const sphere = viewer.GetBoundingSphere(() => true);
+    const c = sphere.center;
+    const r = sphere.radius;
+    const pos = (section.axis === 'x' ? c.x : c.y) + (section.t * 2 - 1) * r;
+    // Keep the part with smaller coordinates; look into the cut from the open side.
+    const normal = section.axis === 'x' ? new Vector3(-1, 0, 0) : new Vector3(0, -1, 0);
+    renderer.clippingPlanes = [new Plane(normal, pos)];
+  }
+  viewer.Render();
 }
