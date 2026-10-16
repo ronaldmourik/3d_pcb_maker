@@ -1,7 +1,27 @@
 {
-  "name": "pcb-maker",
+  "name": "3d-pcb-maker",
   "private": true,
   "version": "0.1.0",
+  "description": "Turn Gerber + Excellon files into 3D-printable circuit boards for copper tape or conductive filament.",
+  "license": "MIT",
+  "author": "Ronald Mourik",
+  "homepage": "https://ronaldmourik.github.io/3d_pcb_maker/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ronaldmourik/3d_pcb_maker.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ronaldmourik/3d_pcb_maker/issues"
+  },
+  "keywords": [
+    "pcb",
+    "gerber",
+    "kicad",
+    "3d-printing",
+    "copper-tape",
+    "opencascade",
+    "step"
+  ],
   "type": "module",
   "scripts": {
     "predev": "node scripts/copy-occt.mjs",

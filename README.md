@@ -1,6 +1,19 @@
 # PCB Maker
 
+[![CI](https://github.com/ronaldmourik/3d_pcb_maker/actions/workflows/ci.yml/badge.svg)](https://github.com/ronaldmourik/3d_pcb_maker/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Browser app that turns Gerber + Excellon exports (KiCad or any EDA tool) into 3D-printable circuit boards for copper tape or conductive filament.
+
+**Try it:** https://ronaldmourik.github.io/3d_pcb_maker/ — everything runs locally in your browser; your files are never uploaded.
+
+## How it works
+
+1. Export Gerbers and drill files from your PCB tool and drop them (or a zip) into the app.
+2. Pick a trace mode and settings, click **Apply**, and check the 3D preview and the printability report.
+3. Download the board (STEP, STL or 3MF) and print it.
+4. Lay copper tape over the board: press it into the channels and sand the top flush (recessed), or cut it along the raised traces (raised). Optional press stamps and vinyl-cutter patterns help with both.
+5. Solder through-hole parts through the printed holes.
 
 **Trace modes**
 - **Recessed**: channels you press copper tape into and sand flush.
@@ -68,3 +81,11 @@ The build uses relative paths, so it works under `https://<user>.github.io/<repo
 Notes:
 - Copper is fused in 2D and extruded once, which is much faster than fusing 3D solids.
 - `scripts/copy-occt.mjs` copies occt-import-js into `public/occt/`. A Vite plugin points Online3DViewer at that copy, so the app works offline.
+
+## Contributing
+
+Issues and pull requests are welcome. Please run `npx tsc` and `npm test` before opening a pull request; geometry changes should come with a test (the existing tests check exact volumes, topology and real KiCad exports in `tests/fixtures/`).
+
+## License
+
+MIT, see [LICENSE](LICENSE). The built app bundles third-party packages under their own licenses, including two LGPL-2.1 OpenCascade WebAssembly builds; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
