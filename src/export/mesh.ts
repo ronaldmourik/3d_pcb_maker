@@ -5,6 +5,8 @@ export interface TriMesh {
   name: string;
   color: string;
   vertices: Float32Array;
+  /** Material name (3MF base material); defaults to the colour. */
+  material?: string;
   triangles: Uint32Array;
 }
 

@@ -233,6 +233,46 @@ describe('printability check', () => {
   });
 });
 
+describe('conductive filament mode', () => {
+  const trace = () =>
+    toBoardInput([
+      parseLayerFile('c-F_Cu.gbr', ['%FSLAX46Y46*%', '%MOMM*%', '%ADD10C,1.0*%', 'D10*', 'X0Y0D02*', 'X10000000Y0D01*', 'M02*'].join(String.fromCharCode(10))),
+    ]);
+
+  it('embeds the traces flush as a second body', () => {
+    const r = buildModel(trace(), { ...defaultSettings, sides: 'top', mode: 'conductive', holes: false, margin: 2 });
+    const [board, traces] = r.parts[0].bodies;
+    expect([board.material, traces.material]).toEqual(['Board', 'Conductive']);
+    const area = 10 + Math.PI * 0.25;
+    expect(measureVolume(traces.shape)).toBeCloseTo(area * 0.4, 4);
+    // Flush: board + traces fill the full 1.6 mm slab (trace box 11 × 1 mm plus 2 mm margin: 15 × 5 mm).
+    expect(measureVolume(board.shape) + measureVolume(traces.shape)).toBeCloseTo(15 * 5 * 1.6, 3);
+    const [, max] = traces.shape.boundingBox.bounds;
+    expect(max[2]).toBeCloseTo(1.6, 6);
+  });
+
+  it('estimates the resistance per net', () => {
+    // 15 Ω·cm = 150 Ω·mm; 10 mm long, 1 mm wide, 0.4 mm thick → 150·10/(1·0.4) = 3750 Ω.
+    const r = buildModel(trace(), { ...defaultSettings, sides: 'top', mode: 'conductive', holes: false });
+    const info = r.issues.filter((i) => i.level === 'info');
+    expect(info).toHaveLength(1);
+    expect(info[0].message).toContain('10.0 mm');
+    expect(info[0].message).toContain('3.8 kΩ');
+  });
+
+  it('uses the conductive minimum width in the printability check', () => {
+    const r = buildModel(trace(), { ...defaultSettings, sides: 'top', mode: 'conductive', holes: false, conductiveMinWidth: 1.5 });
+    expect(r.issues.some((i) => i.level !== 'info' && i.message.startsWith('Trace 1.00 mm wide (min 1.50)'))).toBe(true);
+  });
+
+  it('names the materials in the 3MF', async () => {
+    const r = buildModel(trace(), { ...defaultSettings, sides: 'top', mode: 'conductive', holes: false });
+    const model = strFromU8(unzipSync((await exportParts(r, 'board', '3mf', 0.01, 0.1)).data)['3D/3dmodel.model']);
+    expect(model).toContain('<base name="Board"');
+    expect(model).toContain('<base name="Conductive"');
+  });
+});
+
 describe('copper pours', () => {
   const pour = () => parseLayerFile('pour-F_Cu.gbr', pourGerber());
 

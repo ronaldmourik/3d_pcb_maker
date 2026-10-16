@@ -11,6 +11,7 @@ import { chamferTools, edgeChamferTools, type ChamferStats } from './chamfer';
 import { GeometryCache, hashValue } from './cache';
 import { narrowGaps, narrowTraces, smallHoles, vanishedRegions } from './printability';
 import { faceLoops } from './paths';
+import { estimateNets } from './resistance';
 import { mapPattern, type CutPattern, type PathSeg } from '../export/paths2d';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -23,6 +24,8 @@ export interface Issue {
   message: string;
   side: 'top' | 'bottom';
   at: Pt;
+  /** Informational entries (e.g. resistance estimates) are listed but not marked as problems. */
+  level?: 'info';
 }
 
 export type PartId = 'board' | 'topHalf' | 'bottomHalf' | 'dowels' | 'stampTop' | 'stampBottom';
@@ -31,6 +34,8 @@ export interface Body {
   name: string;
   shape: Shape3D;
   color: string;
+  /** Material name for multi-material 3MF. */
+  material?: string;
 }
 
 export interface Part {
@@ -61,6 +66,7 @@ export const COLORS = {
   copper: '#c87533',
   stamp: '#5b8dd9',
   dowel: '#8a8a8a',
+  conductive: '#3a3a3a',
   issue: '#e53e3e',
 };
 
@@ -263,6 +269,15 @@ export function buildModel(
         }
         board = board.cut(as3D(prism(cf, thickness - d, d + 1)));
         if (s.channelChamfer > 0) board = chamferChannels(board, side, thickness, d, warn, report);
+      } else if (s.mode === 'conductive' && s.conductiveEmbed) {
+        // Flush: the conductive traces fill pockets in the board (one print, two materials).
+        let h = s.traceHeight;
+        if (h > thickness - 0.3) {
+          h = Math.max(0.1, thickness - 0.3);
+          warn(`Conductive trace thickness reduced to ${h.toFixed(2)} mm to leave a floor under the traces.`);
+        }
+        board = board.cut(as3D(prism(cf, thickness - h, h + 1)));
+        copper = as3D(prism(cf, thickness - h, h));
       } else {
         copper = as3D(prism(cf, thickness, s.traceHeight));
         if (s.channelChamfer > 0) copper = chamferRaised(copper, cf, side, thickness + s.traceHeight, warn, report);
@@ -273,7 +288,7 @@ export function buildModel(
     const silk = silkFace(side);
     if (silk) {
       const depth = Math.min(s.silkDepth, thickness - socketDepth - 0.3);
-      if (s.silkMode === 'emboss' && s.mode === 'raised') board = board.fuse(as3D(prism(silk, thickness, s.silkDepth)));
+      if (s.silkMode === 'emboss' && s.mode !== 'recessed') board = board.fuse(as3D(prism(silk, thickness, s.silkDepth)));
       else if (depth > 0.05) {
         if (s.silkMode === 'emboss') warn('Embossed silkscreen would be sanded off in recessed mode; it is engraved instead.');
         board = board.cut(as3D(prism(silk, thickness - depth, depth + 1)));
@@ -290,15 +305,22 @@ export function buildModel(
     const featureH = s.mode === 'recessed' ? s.traceDepth : s.traceHeight;
     const chamfer = s.channelChamfer;
     const silkKey = key(s.silkMode, s.silkDepth, s.silkMinWidth, s.silkClearance);
-    const k = key(outlineKey, holesKey, 'slab', thickness, side, s.mode, featureH, chamfer, s.copperOffset, socketsKey, socketDepth, silkKey);
+    const k = key(outlineKey, holesKey, 'slab', thickness, side, s.mode, featureH, chamfer, s.copperOffset, socketsKey, socketDepth, silkKey, s.mode === 'conductive' ? s.conductiveEmbed : '');
     const r = staged(k, (warn, report) => buildSlab(thickness, side, socketsFace, socketDepth, warn, report));
     return { board: r.board.clone(), copper: r.copper ? r.copper.clone() : null };
   };
 
+  const conductive = s.mode === 'conductive';
+  if (conductive && s.mergeBodies) warnings.push('Conductive traces are kept as a separate body (a second material), even with "merge bodies" on.');
   const bodiesOf = (r: { board: Shape3D; copper: Shape3D | null }, label: string): Body[] => {
-    if (r.copper && s.mergeBodies) return [{ name: label, shape: r.board.fuse(r.copper), color: COLORS.board }];
-    const out: Body[] = [{ name: `${label} base`, shape: r.board, color: COLORS.board }];
-    if (r.copper) out.push({ name: `${label} copper`, shape: r.copper, color: COLORS.copper });
+    if (r.copper && s.mergeBodies && !conductive) return [{ name: label, shape: r.board.fuse(r.copper), color: COLORS.board, material: 'Board' }];
+    const out: Body[] = [{ name: `${label} base`, shape: r.board, color: COLORS.board, material: 'Board' }];
+    if (r.copper)
+      out.push(
+        conductive
+          ? { name: `${label} traces`, shape: r.copper, color: COLORS.conductive, material: 'Conductive' }
+          : { name: `${label} copper`, shape: r.copper, color: COLORS.copper, material: 'Copper' },
+      );
     return out;
   };
   const mirrorBodies = (bodies: Body[]) => bodies.map((b) => ({ ...b, shape: mirrorX(b.shape) }));
@@ -357,15 +379,16 @@ export function buildModel(
     const copperSides: ('top' | 'bottom')[] = doubleSided ? ['top', 'bottom'] : [sides as 'top' | 'bottom'];
     const n = s.nozzleDiameter;
     for (const side of copperSides) {
-      staged(key(outlineKey, 'drc', side, s.copperOffset, n, s.minGap), (_warn, report) => {
+      const minFeature = conductive ? Math.max(2 * n, s.conductiveMinWidth) : 2 * n;
+      staged(key(outlineKey, 'drc', side, s.copperOffset, n, s.minGap, minFeature), (_warn, report) => {
         log(`Checking ${side} copper printability`);
         const prims = (side === 'top' ? input.top : input.bottom) ?? [];
-        const opts = { nozzle: n, minGap: s.minGap, copperOffset: s.copperOffset };
+        const opts = { nozzle: n, minGap: s.minGap, copperOffset: s.copperOffset, minFeature };
         const found = [...narrowTraces(prims, opts)];
         const cf = copperFace(side, s.copperOffset);
         if (cf) {
-          const eroded = copperFace(side, s.copperOffset - n + 1e-3);
-          found.push(...vanishedRegions(cf, eroded, n, found.map((f) => f.at)));
+          const eroded = copperFace(side, s.copperOffset - minFeature / 2 + 1e-3);
+          found.push(...vanishedRegions(cf, eroded, minFeature / 2, found.map((f) => f.at)));
           found.push(...narrowGaps(cf, s.minGap));
         }
         for (const f of found) report({ ...f, side });
@@ -403,8 +426,28 @@ export function buildModel(
     });
   }
 
+  // ---- conductive: resistance per net ----
+  if (conductive) {
+    for (const side of (doubleSided ? ['top', 'bottom'] : [sides]) as ('top' | 'bottom')[]) {
+      staged(key(outlineKey, 'nets', side, s.copperOffset, s.conductiveResistivity, s.traceHeight), (_warn, report) => {
+        const cf = copperFace(side, s.copperOffset);
+        if (!cf) return;
+        const prims = (side === 'top' ? input.top : input.bottom) ?? [];
+        const islands = faceList(cf).map((f) => faceLoops(f));
+        const nets = estimateNets(prims, islands, s.conductiveResistivity, s.traceHeight, s.copperOffset).sort((a, b) => b.resistance - a.resistance);
+        for (const net of nets)
+          report({
+            level: 'info',
+            side,
+            at: net.at,
+            message: `Net: ${net.length.toFixed(1)} mm of trace (min ${net.minWidth.toFixed(2)} mm wide), up to ${formatOhm(net.resistance)}`,
+          });
+      });
+    }
+  }
+
   // ---- press stamps ----
-  if (s.stampEnabled) {
+  if (s.stampEnabled && !conductive) {
     const stampSides: ('top' | 'bottom')[] = doubleSided ? ['top', 'bottom'] : [sides as 'top' | 'bottom'];
     for (const side of stampSides) {
       const stampKey = key(outlineKey, holesKey, 'stamp', side, s.mode, s.copperOffset, s.traceDepth, s.traceHeight, s.stampThickness, s.stampClearance,
@@ -550,4 +593,10 @@ function cutChamferTools(solid: TopoShape, loops: PathSeg[][], top: number, size
     }
   }
   return cur;
+}
+
+function formatOhm(r: number): string {
+  if (r >= 1e6) return `${(r / 1e6).toFixed(1)} MΩ`;
+  if (r >= 1e3) return `${(r / 1e3).toFixed(1)} kΩ`;
+  return `${r.toFixed(r < 10 ? 1 : 0)} Ω`;
 }

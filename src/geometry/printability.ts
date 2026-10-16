@@ -15,13 +15,15 @@ export interface PrintCheckOptions {
   nozzle: number;
   minGap: number;
   copperOffset: number;
+  /** Narrowest allowed trace; defaults to 2 × nozzle. */
+  minFeature?: number;
 }
 
 const fmt = (v: number) => v.toFixed(2);
 
 /** Traces (strokes) narrower than `2 × nozzle`. */
 export function narrowTraces(prims: Primitive[], o: PrintCheckOptions): PrintIssue[] {
-  const minFeature = 2 * o.nozzle;
+  const minFeature = o.minFeature ?? 2 * o.nozzle;
   const out: PrintIssue[] = [];
   for (const p of prims) {
     if (!p.dark || p.kind !== 'stroke') continue;

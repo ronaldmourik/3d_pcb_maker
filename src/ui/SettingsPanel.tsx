@@ -48,24 +48,34 @@ export function SettingsPanel({ hasSilk, draft, onChange, hasTop, hasBottom, has
   const sides = both ? draft.sides : hasTop ? 'top' : 'bottom';
   const doubleSided = both && draft.sides === 'both';
   const recessed = draft.mode === 'recessed';
+  const conductive = draft.mode === 'conductive';
 
   return (
     <div className="settings">
       <Section title="Copper traces">
         <div className="segmented">
-          {(['recessed', 'raised'] as const).map((m) => (
+          {(['recessed', 'raised', 'conductive'] as const).map((m) => (
             <button key={m} className={draft.mode === m ? 'active' : ''} onClick={() => set('mode', m)}>
-              {m === 'recessed' ? 'Recessed (sand off)' : 'Raised (cut out)'}
+              {m === 'recessed' ? 'Recessed (sand off)' : m === 'raised' ? 'Raised (cut out)' : 'Conductive filament'}
             </button>
           ))}
         </div>
         <p className="hint">
           {recessed
             ? 'Traces are channels. Lay the tape over them, press it in, then sand the top surface.'
-            : 'Traces stand proud. Lay the tape over them and cut it along the trace edges.'}
+            : conductive
+              ? 'Traces are printed in conductive filament as a second material. No tape needed.'
+              : 'Traces stand proud. Lay the tape over them and cut it along the trace edges.'}
         </p>
-        {recessed ? num('traceDepth', 'Channel depth', { min: 0.05 }) : num('traceHeight', 'Trace height', { min: 0.05 })}
-        {num('channelChamfer', 'Edge chamfer', {
+        {recessed ? num('traceDepth', 'Channel depth', { min: 0.05 }) : num('traceHeight', conductive ? 'Trace thickness' : 'Trace height', { min: 0.05 })}
+        {conductive && (
+          <>
+            {bool('conductiveEmbed', 'Embed flush in the board', 'On: traces fill pockets (one two-material print). Off: traces stand on top.')}
+            {num('conductiveResistivity', 'Filament resistivity', { step: 1, min: 0.01, unit: 'Ω·cm', hint: 'Volume resistivity from the filament datasheet (conductive PLA ≈ 15 Ω·cm).' })}
+            {num('conductiveMinWidth', 'Min trace width', { step: 0.1, min: 0.2, hint: 'Narrower traces are reported by the printability check.' })}
+          </>
+        )}
+        {!(conductive && draft.conductiveEmbed) && num('channelChamfer', 'Edge chamfer', {
           step: 0.05,
           min: 0,
           hint: recessed
@@ -142,7 +152,7 @@ export function SettingsPanel({ hasSilk, draft, onChange, hasTop, hasBottom, has
         </Section>
       )}
 
-      <Section title="Press stamp">
+      {!conductive && <Section title="Press stamp">
         {bool('stampEnabled', recessed ? 'Rib stamp (presses tape into channels)' : 'Pocket stamp (shears tape at trace edges)')}
         {draft.stampEnabled && (
           <>
@@ -169,6 +179,7 @@ export function SettingsPanel({ hasSilk, draft, onChange, hasTop, hasBottom, has
         )}
       </Section>
 
+      }
       <Section title="Printer">
         {bool('printCheck', 'Printability check', 'Warn about traces, pads, gaps and holes the nozzle cannot print.')}
         {draft.printCheck && (

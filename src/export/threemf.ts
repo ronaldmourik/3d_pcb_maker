@@ -29,7 +29,9 @@ function weld(m: TriMesh): { verts: number[]; tris: number[] } {
 }
 
 export function write3mf(meshes: TriMesh[], title: string): Uint8Array {
-  const colors = [...new Set(meshes.map((m) => m.color))];
+  // One base material per distinct material (or colour), so slicers can assign extruders per material.
+  const matKey = (m: TriMesh) => m.material ?? m.color;
+  const mats = [...new Map(meshes.map((m) => [matKey(m), m])).values()];
   const parts: string[] = [];
   meshes.forEach((m, i) => {
     const { verts, tris } = weld(m);
@@ -38,7 +40,7 @@ export function write3mf(meshes: TriMesh[], title: string): Uint8Array {
     const t: string[] = [];
     for (let k = 0; k < tris.length; k += 3) t.push(`<triangle v1="${tris[k]}" v2="${tris[k + 1]}" v3="${tris[k + 2]}"/>`);
     parts.push(
-      `<object id="${i + 2}" name="${esc(m.name)}" type="model" pid="1" pindex="${colors.indexOf(m.color)}"><mesh><vertices>${v.join('')}</vertices><triangles>${t.join('')}</triangles></mesh></object>`,
+      `<object id="${i + 2}" name="${esc(m.name)}" type="model" pid="1" pindex="${mats.findIndex((x) => matKey(x) === matKey(m))}"><mesh><vertices>${v.join('')}</vertices><triangles>${t.join('')}</triangles></mesh></object>`,
     );
   });
   const groupId = meshes.length + 2;
@@ -48,7 +50,7 @@ export function write3mf(meshes: TriMesh[], title: string): Uint8Array {
 <metadata name="Title">${esc(title)}</metadata>
 <metadata name="Application">pcb-maker</metadata>
 <resources>
-<basematerials id="1">${colors.map((c, i) => `<base name="color${i}" displaycolor="${c.toUpperCase()}FF"/>`).join('')}</basematerials>
+<basematerials id="1">${mats.map((m, i) => `<base name="${esc(m.material ?? `color${i}`)}" displaycolor="${m.color.toUpperCase()}FF"/>`).join('')}</basematerials>
 ${parts.join('\n')}
 <object id="${groupId}" name="${esc(title)}" type="model"><components>${components}</components></object>
 </resources>

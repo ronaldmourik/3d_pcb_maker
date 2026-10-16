@@ -1,6 +1,6 @@
 // Generation parameters. The UI edits a draft copy; only applied settings drive a build.
 
-export type Mode = 'raised' | 'recessed';
+export type Mode = 'raised' | 'recessed' | 'conductive';
 export type Sides = 'top' | 'bottom' | 'both';
 
 export interface Settings {
@@ -44,6 +44,12 @@ export interface Settings {
   meshTolerance: number;
   angularTolerance: number;
   mergeBodies: boolean;
+
+  /** Conductive filament: traces embedded flush (two-material print) or standing on top. */
+  conductiveEmbed: boolean;
+  /** Filament volume resistivity in Ω·cm. */
+  conductiveResistivity: number;
+  conductiveMinWidth: number;
 
   /** Silkscreen marks on the copper face. */
   silkMode: 'off' | 'engrave' | 'emboss';
@@ -96,6 +102,10 @@ export const defaultSettings: Settings = {
   meshTolerance: 0.01,
   angularTolerance: 0.1,
   mergeBodies: false,
+
+  conductiveEmbed: true,
+  conductiveResistivity: 15,
+  conductiveMinWidth: 1.5,
 
   silkMode: 'engrave',
   silkDepth: 0.3,

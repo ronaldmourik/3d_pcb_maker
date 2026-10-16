@@ -9,6 +9,8 @@ import { IssueList } from './ui/IssueList';
 export default function App() {
   const b = useBoardBuild();
   const { preview } = b;
+  const problems = b.issues.filter((i) => i.level !== 'info');
+  const info = b.issues.filter((i) => i.level === 'info');
 
   return (
     <div className="app">
@@ -56,12 +58,17 @@ export default function App() {
           <ExportBar parts={b.parts} copperSides={b.copperSides} busy={!!b.busy} onExport={b.exportPart} />
         </div>
         {b.error && <div className="banner error">{b.error}</div>}
-        {(b.warnings.length > 0 || b.issues.length > 0) && (
+        {(b.warnings.length > 0 || problems.length > 0) && (
           <div className="banner warn">
             {b.warnings.map((w) => (
               <div key={w}>{w}</div>
             ))}
-            <IssueList issues={b.issues} onFocus={b.focusIssue} />
+            <IssueList issues={problems} onFocus={b.focusIssue} />
+          </div>
+        )}
+        {info.length > 0 && (
+          <div className="banner info">
+            <IssueList issues={info} onFocus={b.focusIssue} plain />
           </div>
         )}
         <Viewer step={b.step} fitKey={b.fitKey} focus={b.focus} busy={!!b.busy || (!b.engineReady && b.layers.length > 0)} busyText={b.busy ?? 'Loading geometry engine…'} />

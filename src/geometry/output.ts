@@ -102,6 +102,7 @@ export function previewShapes(r: BuildResult, opt: PreviewOptions): ShapeConfig[
 
 export interface IssueSpot {
   message: string;
+  level?: 'info';
   /** Position in preview (STEP) coordinates, on the copper face. */
   at: [number, number, number];
 }
@@ -117,19 +118,22 @@ export function previewIssueSpots(r: BuildResult, opt: PreviewOptions): IssueSpo
   };
   return r.issues.map((i) => {
     const [x, y] = i.at;
+    const base = { message: i.message, level: i.level };
     if (!r.doubleSided) {
       // Single-sided boards are printed copper-up; a bottom layer is mirrored.
-      return { message: i.message, at: [i.side === 'bottom' ? 2 * cx - x : x, y, topZ('board')] };
+      return { ...base, at: [i.side === 'bottom' ? 2 * cx - x : x, y, topZ('board')] };
     }
-    if (i.side === 'top') return { message: i.message, at: [x, y, topZ('topHalf')] };
-    if (opt.layout === 'assembled') return { message: i.message, at: [x, y, -topZ('bottomHalf')] };
-    return { message: i.message, at: [2 * cx - x + W + GAP, y, topZ('bottomHalf')] };
+    if (i.side === 'top') return { ...base, at: [x, y, topZ('topHalf')] };
+    if (opt.layout === 'assembled') return { ...base, at: [x, y, -topZ('bottomHalf')] };
+    return { ...base, at: [2 * cx - x + W + GAP, y, topZ('bottomHalf')] };
   });
 }
 
 /** Red pins marking located issues (preview only, never exported). */
 function issueMarkers(r: BuildResult, opt: PreviewOptions): ShapeConfig[] {
-  return previewIssueSpots(r, opt).map((i) => {
+  return previewIssueSpots(r, opt)
+    .filter((i) => i.level !== 'info')
+    .map((i) => {
     const up = i.at[2] >= 0 ? 1 : -1;
     const base: [number, number, number] = [i.at[0], i.at[1], up > 0 ? i.at[2] : i.at[2] - 1.5];
     return { shape: makeCylinder(0.25, 1.5, base), name: `Issue: ${i.message}`, color: COLORS.issue };
@@ -143,7 +147,7 @@ export function previewStep(r: BuildResult, opt: PreviewOptions): Blob {
 function partFile(r: BuildResult, p: Part, format: ExportFormat, tol: number, angTol: number): { name: string; data: Uint8Array | Blob } {
   const base = `${r.name}-${p.id}`;
   if (format === 'step') return { name: `${base}.step`, data: exportSTEP(p.bodies.map((b) => ({ shape: b.shape, name: b.name, color: b.color })), { unit: 'MM' }) };
-  const meshes = p.bodies.map((b) => tessellate(b.shape, b.name, b.color, tol, angTol));
+  const meshes = p.bodies.map((b) => ({ ...tessellate(b.shape, b.name, b.color, tol, angTol), material: b.material }));
   if (format === 'stl') return { name: `${base}.stl`, data: writeStl(meshes, base) };
   return { name: `${base}.3mf`, data: write3mf(meshes, base) };
 }
