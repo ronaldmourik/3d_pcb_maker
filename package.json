@@ -1,0 +1,32 @@
+{
+  "name": "pcb-maker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "predev": "node scripts/copy-occt.mjs",
+    "dev": "vite",
+    "prebuild": "node scripts/copy-occt.mjs",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "fflate": "^0.8.3",
+    "occt-import-js": "^0.0.22",
+    "online-3d-viewer": "^0.18.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "replicad": "^1.1.0",
+    "replicad-opencascadejs": "^1.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.5"
+  }
+}
