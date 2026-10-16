@@ -150,6 +150,33 @@ describe('channel chamfer', () => {
     expect(removed(single(['%ADD10R,2.0X2.0*%', 'D10*', 'X0Y0D03*']), c)).toBeCloseTo(expected, 3);
   });
 
+  const raisedRemoved = (input: ReturnType<typeof single>, c: number) => {
+    const v = (cc: number) => {
+      const r = buildModel(input, { ...defaultSettings, sides: 'top', mode: 'raised', channelChamfer: cc, holes: false });
+      const copper = r.parts[0].bodies[1].shape;
+      expect(isValid(copper.wrapped)).toBe(true);
+      expect(r.warnings.filter((w) => w.includes('hamfer'))).toEqual([]);
+      return measureVolume(copper);
+    };
+    return v(0) - v(c);
+  };
+
+  it('bevels a raised trace exactly', () => {
+    // Straight edges 2·10·c²/2, round caps (convex, R = 0.5): π·c²·(R − c/3).
+    const c = 0.2;
+    // Within 0.3 %: the tools' 0.1 µm flat bottom (FLAT in chamfer.ts) widens the bevel by ~0.2 µm.
+    const expected = 2 * 10 * (c * c) / 2 + Math.PI * c * c * (0.5 - c / 3);
+    const got = raisedRemoved(single(['%ADD10C,1.0*%', 'D10*', 'X0Y0D02*', 'X10000000Y0D01*']), c);
+    expect(Math.abs(got - expected) / expected).toBeLessThan(0.003);
+  });
+
+  it('bevels a raised rectangular pad exactly (corners included)', () => {
+    // Inward offset of a 2×2 square loses P·t − 4t² area: ∫0..c = P·c²/2 − 4c³/3.
+    const c = 0.2;
+    const expected = (8 * c * c) / 2 - (4 * c ** 3) / 3;
+    expect(raisedRemoved(single(['%ADD10R,2.0X2.0*%', 'D10*', 'X0Y0D03*']), c)).toBeCloseTo(expected, 3);
+  });
+
   it('limits the chamfer to the channel depth', () => {
     const r = build({ sides: 'top', mode: 'recessed', traceDepth: 0.3, channelChamfer: 0.5 });
     expect(r.warnings.some((w) => w.includes('limited to 0.25'))).toBe(true);

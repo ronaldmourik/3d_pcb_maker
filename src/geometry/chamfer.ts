@@ -1,16 +1,16 @@
-// 45° chamfer on the top rim of recessed channels.
+// 45° chamfers: on the top rim of recessed channels, and on the top edges of raised copper.
 //
 // OpenCascade's edge chamfer fails on typical PCB geometry (traces exactly as wide as their pads give
 // tangent contacts). Instead we cut a tapered tool: the chamfer volume of a union is the union of the
 // chamfer volumes of its parts (Minkowski sum distributes over union), so every primitive gets its own
 // lofted frustum whose top and bottom outlines share the same topology.
-import { type Drawing } from 'replicad';
-import { getOC } from 'replicad';
+import { cast, draw, getOC, type Drawing } from 'replicad';
 import type { Contour, Primitive, Pt, Seg } from '../gerber/types';
 import { arcSweep } from '../gerber/gerber';
 import { contourPoints, polygonArea } from '../gerber/geom2d';
 import { arcBand, circleDrawing, contourDrawing, primitiveDrawings, primitivePoint, stadium, type Progress } from './faces';
 import { drawingFace, prism } from './occ';
+import { arcAngles, type PathSeg } from '../export/paths2d';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TopoShape = any;
@@ -90,6 +90,94 @@ function sectionPairs(p: Primitive, offset: number, grow: number): [Drawing, Dra
       if (!base || !topC) return null;
       return [[contourDrawing(base), contourDrawing(topC)]];
     }
+  }
+}
+
+/**
+ * Exact 45° chamfer tools for the top rim of a solid whose top face is the region bounded by `loops`
+ * (lines/arcs from `faceLoops`). A point at height z is removed when it lies within (z − z0) of the boundary.
+ * Distance to a union of edges is the minimum over the edges, so the removal region is the union of:
+ * a 45° wedge along every straight edge, a revolved wedge along every arc, and a cone at every vertex.
+ * All surfaces are planes and cones, which keeps the booleans fast.
+ * Cut the returned tools from the solid (they only remove material that is inside it).
+ */
+export function edgeChamferTools(loops: PathSeg[][], top: number, size: number, progress?: Progress): TopoShape[] {
+  const z0 = top - size;
+  const grow = size + OVER;
+  const tools: TopoShape[] = [];
+  const vertices: Pt[] = [];
+  const addVertex = (q: Pt) => {
+    if (!vertices.some((v) => Math.hypot(v[0] - q[0], v[1] - q[1]) < 1e-6)) vertices.push(q);
+  };
+  const segs = loops.flat();
+  segs.forEach((sg, i) => {
+    if (progress && (i % 25 === 0 || i === segs.length - 1)) progress(i + 1, segs.length);
+    addVertex(sg.a);
+    addVertex(sg.b);
+    const g = sg.type === 'arc' ? arcAngles(sg.a, sg.m, sg.b) : null;
+    if (g) tools.push(arcWedge(g.c, g.r, g.start, g.sweep, z0, grow));
+    else if (Math.hypot(sg.b[0] - sg.a[0], sg.b[1] - sg.a[1]) > EPS) tools.push(lineWedge(sg.a, sg.b, z0, grow));
+  });
+  for (const v of vertices) tools.push(revolveProfile([[0, -FLAT], [FLAT, -FLAT], [grow + FLAT, grow], [0, grow]], v, 0, 2 * Math.PI, z0));
+  return tools;
+}
+
+/**
+ * Tents get a tiny flat bottom just below the slope start, so their faces cross the solid's side walls
+ * instead of touching them along an edge (coincident edges make the boolean fail). Error: FLAT mm.
+ */
+const FLAT = 1e-4;
+
+/** Closed polygon (u, v) on the XZ plane: u → X, v → Z. */
+function profileFace(points: [number, number][]): TopoShape {
+  let pen = draw(points[0]);
+  for (const q of points.slice(1)) pen = pen.lineTo(q);
+  return (pen.close().sketchOnPlane('XZ') as any).face().wrapped;
+}
+
+/** Inverted triangle (apex on the edge at z0) swept along the edge a → b. */
+function lineWedge(a: Pt, b: Pt, z0: number, grow: number): TopoShape {
+  const OC = getOC() as any;
+  const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  const face = profileFace([[-FLAT, -FLAT], [FLAT, -FLAT], [grow + FLAT, grow], [-grow - FLAT, grow]]);
+  const v = new OC.gp_Vec(0, L, 0);
+  const mk = new OC.BRepPrimAPI_MakePrism(face, v, false, true);
+  try {
+    const angle = (Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI - 90;
+    return cast(mk.Shape()).rotate(angle, [0, 0, 0], [0, 0, 1]).translate(a[0], a[1], z0).wrapped;
+  } finally {
+    mk.delete();
+    v.delete();
+  }
+}
+
+/** The same triangle revolved around the arc centre over the arc's sweep. */
+function arcWedge(c: Pt, r: number, start: number, sweep: number, z0: number, grow: number): TopoShape {
+  // Inside the arc the triangle may cross the axis; clip it there (still exact: those points are within reach).
+  const profile: [number, number][] =
+    r - grow - 2 * FLAT > EPS
+      ? [[r - FLAT, -FLAT], [r + FLAT, -FLAT], [r + grow + FLAT, grow], [r - grow - FLAT, grow]]
+      : [[r - FLAT, -FLAT], [r + FLAT, -FLAT], [r + grow + FLAT, grow], [0, grow], [0, r - 2 * FLAT]];
+  const from = sweep >= 0 ? start : start + sweep;
+  return revolveProfile(profile, c, from, Math.abs(sweep), z0);
+}
+
+function revolveProfile(profile: [number, number][], at: Pt, fromAngle: number, sweep: number, z0: number): TopoShape {
+  const OC = getOC() as any;
+  const face = profileFace(profile);
+  const origin = new OC.gp_Pnt(0, 0, 0);
+  const dir = new OC.gp_Dir(new OC.gp_Vec(0, 0, 1));
+  const axis = new OC.gp_Ax1(origin, dir);
+  const mk = new OC.BRepPrimAPI_MakeRevol(face, axis, Math.min(sweep, 2 * Math.PI), false);
+  try {
+    let shape = cast(mk.Shape());
+    if (fromAngle) shape = shape.rotate((fromAngle * 180) / Math.PI, [0, 0, 0], [0, 0, 1]);
+    return shape.translate(at[0], at[1], z0).wrapped;
+  } finally {
+    mk.delete();
+    axis.delete();
+    dir.delete();
+    origin.delete();
   }
 }
 

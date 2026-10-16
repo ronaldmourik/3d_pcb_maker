@@ -64,12 +64,13 @@ export function SettingsPanel({ draft, onChange, hasTop, hasBottom, hasOutline, 
             : 'Traces stand proud. Lay the tape over them and cut it along the trace edges.'}
         </p>
         {recessed ? num('traceDepth', 'Channel depth', { min: 0.05 }) : num('traceHeight', 'Trace height', { min: 0.05 })}
-        {recessed &&
-          num('channelChamfer', 'Channel edge chamfer', {
-            step: 0.05,
-            min: 0,
-            hint: '45° chamfer on the top edges of the channels, so the tape bends in without tearing. 0 = sharp edges.',
-          })}
+        {num('channelChamfer', 'Edge chamfer', {
+          step: 0.05,
+          min: 0,
+          hint: recessed
+            ? '45° chamfer on the top edges of the channels, so the tape bends in without tearing. 0 = sharp edges.'
+            : '45° bevel on the top edges of the raised traces: a clean line to cut along, and the tape wraps without tearing. 0 = sharp edges.',
+        })}
         {num('copperOffset', 'Copper grow / shrink', { step: 0.05, hint: 'Positive widens all traces and pads, negative narrows them.' })}
         <label className="field">
           <span>Sides</span>

@@ -1,5 +1,5 @@
 // Builds the printable B-rep parts (board / halves / dowels / stamps) with OpenCascade.
-import { cast, makeCylinder, type AnyShape, type Shape3D } from 'replicad';
+import { cast, getOC, makeCompound, makeCylinder, type AnyShape, type Shape3D } from 'replicad';
 import type { BoardInput, Contour, Pt } from '../gerber/types';
 import { buildOutline, type OutlineShape } from '../gerber/outline';
 import { addPt, contourPoints, drillsBounds, emptyBounds, isEmpty, primitivesBounds, type Bounds } from '../gerber/geom2d';
@@ -7,7 +7,7 @@ import { resolveSides, type Settings } from '../state/settings';
 import { circlesFace, contourFace, drillsFace, layerFace, type FaceStats } from './faces';
 import { common, cutAll, fuseAll, isNullOrEmpty, isValid, prism, unify } from './occ';
 import { placeDowels } from './dowels';
-import { chamferTools, type ChamferStats } from './chamfer';
+import { chamferTools, edgeChamferTools, type ChamferStats } from './chamfer';
 import { GeometryCache, hashValue } from './cache';
 import { narrowGaps, narrowTraces, smallHoles, vanishedRegions } from './printability';
 import { faceLoops } from './paths';
@@ -187,6 +187,46 @@ export function buildModel(
     return board;
   };
 
+  /** Chamfer the top edges of raised copper (exact, from the merged outline). */
+  // Each copper island is chamfered on its own: many small booleans are far faster than one with
+  // hundreds of overlapping tools, and islands never interact.
+  const chamferRaised = (copper: Shape3D, cf: TopoShape, side: 'top' | 'bottom', top: number, warn: Warn, report: Report): Shape3D => {
+    const size = Math.min(s.channelChamfer, s.traceHeight - 0.05);
+    if (size < s.channelChamfer) warn(`Edge chamfer limited to ${size.toFixed(2)} mm by the trace height.`);
+    if (size <= 0.01) return copper;
+    try {
+      const islands = faceList(cf);
+      const solids = islands.map((face, i) => {
+        log(`Chamfering ${side} traces ${i + 1}/${islands.length}`);
+        const island = prism(face, top - s.traceHeight, s.traceHeight).wrapped;
+        const tools = edgeChamferTools(faceLoops(face), top, size);
+        // One tool at a time is the most reliable (and multi-tool cuts can silently do nothing);
+        // fall back to a single cut with the fused tools, and finally leave the island sharp.
+        const attempts = [
+          () => tools.reduce((cur, t) => cutAll(cur, [t]), island),
+          () => cutAll(island, [fuseAll(tools)]),
+        ];
+        for (const attempt of attempts) {
+          try {
+            const r = attempt();
+            if (isValid(r)) return r;
+          } catch {
+            /* next attempt */
+          }
+        }
+        const [min, max] = cast(face).boundingBox.bounds;
+        report({ message: 'Copper area left without edge chamfer', side, at: [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2] });
+        return island;
+      });
+      const chamfered = as3D(cast(solids.length === 1 ? solids[0] : makeCompound(solids.map((x) => cast(x))).wrapped));
+      if (isValid(chamfered.wrapped)) return chamfered;
+    } catch {
+      /* fall through */
+    }
+    warn('Trace edge chamfer failed; edges left sharp.');
+    return copper;
+  };
+
   // ---- board / halves ----
   const buildSlab = (thickness: number, side: 'top' | 'bottom', socketsFace: TopoShape | null, socketDepth: number, warn: Warn, report: Report) => {
     let board = as3D(prism(outlineFace, 0, thickness));
@@ -203,6 +243,7 @@ export function buildModel(
         if (s.channelChamfer > 0) board = chamferChannels(board, side, thickness, d, warn, report);
       } else {
         copper = as3D(prism(cf, thickness, s.traceHeight));
+        if (s.channelChamfer > 0) copper = chamferRaised(copper, cf, side, thickness + s.traceHeight, warn, report);
       }
     } else {
       warn(`The ${side} copper layer is empty after clipping to the outline.`);
@@ -216,7 +257,7 @@ export function buildModel(
   };
   const slab = (thickness: number, side: 'top' | 'bottom', socketsFace: TopoShape | null, socketDepth: number, socketsKey = '') => {
     const featureH = s.mode === 'recessed' ? s.traceDepth : s.traceHeight;
-    const chamfer = s.mode === 'recessed' ? s.channelChamfer : 0;
+    const chamfer = s.channelChamfer;
     const k = key(outlineKey, holesKey, 'slab', thickness, side, s.mode, featureH, chamfer, s.copperOffset, socketsKey, socketDepth);
     const r = staged(k, (warn, report) => buildSlab(thickness, side, socketsFace, socketDepth, warn, report));
     return { board: r.board.clone(), copper: r.copper ? r.copper.clone() : null };
@@ -446,4 +487,14 @@ function slotLoop(a: Pt, b: Pt, r: number): PathSeg[] {
     { type: 'line', a: p(b, -nx, -ny), b: p(a, -nx, -ny) },
     { type: 'arc', a: p(a, -nx, -ny), m: p(a, -ux * r, -uy * r), b: p(a, nx, ny) },
   ];
+}
+
+/** The individual faces of a (compound) face shape. */
+function faceList(shape: TopoShape): TopoShape[] {
+  const OC = getOC() as any;
+  const out: TopoShape[] = [];
+  const exp = new OC.TopExp_Explorer(shape, OC.TopAbs_ShapeEnum.TopAbs_FACE, OC.TopAbs_ShapeEnum.TopAbs_SHAPE);
+  for (; exp.More(); exp.Next()) out.push(OC.TopoDS.Face(exp.Current()));
+  exp.delete();
+  return out;
 }

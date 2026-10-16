@@ -95,6 +95,19 @@ describe('ketel_opto double-sided', () => {
     expect(other.cacheHits).toBeLessThan(second.cacheHits);
   });
 
+  it('bevels raised traces on both halves', () => {
+    const base = { ...defaultSettings, sides: 'both' as const, mode: 'raised' as const };
+    const sharp = buildModel(input(), base);
+    const bevelled = buildModel(input(), { ...base, channelChamfer: 0.2 });
+    expect(bevelled.warnings.filter((w) => w.includes('hamfer'))).toEqual([]);
+    for (const id of ['topHalf', 'bottomHalf']) {
+      const a = sharp.parts.find((p) => p.id === id)!.bodies[1].shape;
+      const b = bevelled.parts.find((p) => p.id === id)!.bodies[1].shape;
+      expect(isValid(b.wrapped)).toBe(true);
+      expect(measureVolume(b)).toBeLessThan(measureVolume(a));
+    }
+  });
+
   it('chamfers recessed channels on both halves', () => {
     const base = { ...defaultSettings, sides: 'both' as const, mode: 'recessed' as const };
     const sharp = buildModel(input(), base);
