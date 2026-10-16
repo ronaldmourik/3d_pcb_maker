@@ -5,7 +5,8 @@ import type { PartInfo, WorkerResponse } from '../geometry/protocol';
 import type { ExportFormat, ExportTarget, IssueSpot, PreviewOptions } from '../geometry/output';
 import { parseRawFiles, readUploads, toBoardInput } from '../gerber/loadFiles';
 import type { LayerRole, ParsedLayer } from '../gerber/types';
-import { defaultSettings, settingsEqual, type Settings } from './settings';
+import { settingsEqual, type Settings } from './settings';
+import { applyPreset, BUILT_IN_PRESETS, load, presetValues, save, type Preset } from './persist';
 
 type Built = Extract<WorkerResponse, { type: 'built' }>;
 
@@ -33,9 +34,11 @@ export function useBoardBuild() {
   const [engineReady, setEngineReady] = useState(false);
   const [layers, setLayers] = useState<ParsedLayer[]>([]);
   const [layersVersion, setLayersVersion] = useState(0);
-  const [draft, setDraft] = useState<Settings>(defaultSettings);
+  const [stored] = useState(() => load());
+  const [draft, setDraft] = useState<Settings>(stored.draft);
+  const [userPresets, setUserPresets] = useState<Preset[]>(stored.presets);
   const [applied, setApplied] = useState<Applied | null>(null);
-  const [preview, setPreview] = useState<PreviewOptions>({ layout: 'print', showStamps: true });
+  const [preview, setPreview] = useState<PreviewOptions>(stored.preview ?? { layout: 'print', showStamps: true });
   const [step, setStep] = useState<ArrayBuffer | null>(null);
   const [parts, setParts] = useState<PartInfo[]>([]);
   const [copperSides, setCopperSides] = useState<('top' | 'bottom')[]>([]);
@@ -54,6 +57,21 @@ export function useBoardBuild() {
   previewRef.current = preview;
 
   useEffect(() => client.onReady(() => setEngineReady(true)), []);
+  // Remember settings, view and presets between visits.
+  useEffect(() => save({ draft, preview, presets: userPresets }), [draft, preview, userPresets]);
+
+  const presets = [...BUILT_IN_PRESETS, ...userPresets];
+  const loadPreset = (name: string) => {
+    const p = presets.find((x) => x.name === name);
+    if (p) setDraft((d) => applyPreset(d, p));
+  };
+  const savePreset = (name: string) => {
+    const clean = name.trim();
+    if (!clean || BUILT_IN_PRESETS.some((p) => p.name === clean)) return false;
+    setUserPresets((ps) => [...ps.filter((p) => p.name !== clean), { name: clean, values: presetValues(draft) }]);
+    return true;
+  };
+  const deletePreset = (name: string) => setUserPresets((ps) => ps.filter((p) => p.name !== name));
 
   const markBuilding = (b: boolean) => {
     buildingRef.current = b;
@@ -184,6 +202,10 @@ export function useBoardBuild() {
     layers,
     draft,
     setDraft,
+    presets,
+    loadPreset,
+    savePreset,
+    deletePreset,
     preview,
     step,
     parts,

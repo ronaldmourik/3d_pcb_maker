@@ -85,3 +85,7 @@ button.link { border: none; background: none; padding: 0; color: #975a16; text-d
 .issue-pos { color: #7b8794; font-size: 11px; }
 .banner.info { background: #ebf8ff; max-height: 20vh; overflow-y: auto; }
 .banner.info button.link { color: #2c5282; }
+.preset-bar { display: flex; gap: 6px; margin: 10px 0 4px; }
+.preset-bar select { flex: 1; }
+.preset-bar form { display: flex; gap: 6px; flex: 1; }
+.preset-bar input { flex: 1; border: 1px solid var(--border); border-radius: 5px; padding: 3px 6px; }

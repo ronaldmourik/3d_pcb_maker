@@ -5,6 +5,7 @@ import { Viewer } from './ui/Viewer';
 import { ExportBar } from './ui/ExportBar';
 import { useBoardBuild } from './state/useBoardBuild';
 import { IssueList } from './ui/IssueList';
+import { PresetBar } from './ui/PresetBar';
 
 export default function App() {
   const b = useBoardBuild();
@@ -22,6 +23,7 @@ export default function App() {
         <FileDrop onFiles={b.addFiles} />
         <LayerList layers={b.layers} onRole={b.setRole} onRemove={b.removeLayer} />
         {b.layers.length > 0 && !b.hasTop && !b.hasBottom && <p className="error">Assign at least one copper layer.</p>}
+        <PresetBar presets={b.presets} onUse={b.loadPreset} onSave={b.savePreset} onDelete={b.deletePreset} />
         <SettingsPanel
           hasSilk={b.hasSilk}
           draft={b.draft}
