@@ -44,6 +44,11 @@ export interface Settings {
   meshTolerance: number;
   angularTolerance: number;
   mergeBodies: boolean;
+
+  /** Printability check against the printer nozzle. */
+  printCheck: boolean;
+  nozzleDiameter: number;
+  minGap: number;
 }
 
 export const defaultSettings: Settings = {
@@ -85,6 +90,10 @@ export const defaultSettings: Settings = {
   meshTolerance: 0.01,
   angularTolerance: 0.1,
   mergeBodies: false,
+
+  printCheck: true,
+  nozzleDiameter: 0.4,
+  minGap: 0.5,
 };
 
 export function settingsEqual(a: Settings, b: Settings): boolean {

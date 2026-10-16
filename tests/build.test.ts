@@ -155,6 +155,54 @@ describe('channel chamfer', () => {
   });
 });
 
+describe('printability check', () => {
+  const gerber = [
+    '%FSLAX46Y46*%',
+    '%MOMM*%',
+    // KiCad round-rect macro: built from small corner circles/strokes, must not be flagged as tiny.
+    '%AMRoundRect*0 Rectangle with rounded corners*4,1,4,$2,$3,$4,$5,$6,$7,$8,$9,$2,$3,0*1,1,$1+$1,$2,$3*1,1,$1+$1,$4,$5*1,1,$1+$1,$6,$7*1,1,$1+$1,$8,$9*20,1,$1+$1,$2,$3,$4,$5,0*20,1,$1+$1,$4,$5,$6,$7,0*20,1,$1+$1,$6,$7,$8,$9,0*20,1,$1+$1,$8,$9,$2,$3,0*%',
+    '%ADD10C,0.300000*%',
+    '%ADD11C,2.000000*%',
+    '%ADD12R,0.500000X0.500000*%',
+    '%ADD13C,0.800000*%',
+    '%ADD14RoundRect,0.250000X-0.750000X-0.750000X0.750000X-0.750000X0.750000X0.750000X-0.750000X0.750000X0*%',
+    'D10*', 'X0Y0D02*', 'X10000000Y0D01*', // 0.3 mm trace
+    'D11*', 'X20000000Y0D03*', 'X22200000Y0D03*', // 0.2 mm gap between pads
+    'D12*', 'X30000000Y0D03*', // 0.5 mm pad
+    'D13*', 'X0Y10000000D02*', 'X10000000Y10000000D01*', // exactly 2 × nozzle: fine
+    'D14*', 'X40000000Y0D03*', // 1.5 mm round-rect pad: fine
+    'M02*',
+  ].join(String.fromCharCode(10));
+  const drill = ['M48', 'METRIC', 'T1C0.500', 'T2C1.000', '%', 'T1', 'X50.0Y0.0', 'T2', 'X0.0Y10.0', 'M30'].join(String.fromCharCode(10));
+  const input = () => toBoardInput([parseLayerFile('drc-F_Cu.gbr', gerber), parseLayerFile('drc.drl', drill)]);
+
+  it('reports narrow traces, small features, tight gaps and small holes at their location', () => {
+    const r = buildModel(input(), { ...defaultSettings, sides: 'top' });
+    const found = r.issues.map((i) => [i.message.split(' ')[0], +i.at[0].toFixed(2) + 0, +i.at[1].toFixed(2) + 0]);
+    expect(found).toEqual(
+      expect.arrayContaining([
+        ['Trace', 5, 0],
+        ['Gap', 21.1, 0],
+        ['Copper', 30, 0],
+        ['Hole', 50, 0],
+      ]),
+    );
+    expect(found).toHaveLength(4);
+    expect(r.issues.find((i) => i.message.startsWith('Gap'))!.message).toContain('0.20 mm');
+  });
+
+  it('is quiet on the real boards and can be switched off', () => {
+    const real = buildModel(fixtureInput(), { ...defaultSettings, sides: 'both' });
+    expect(real.issues).toEqual([]);
+    expect(buildModel(input(), { ...defaultSettings, sides: 'top', printCheck: false }).issues).toEqual([]);
+  });
+
+  it('warns about a thin channel floor', () => {
+    const r = build({ sides: 'top', mode: 'recessed', boardThickness: 0.6, traceDepth: 0.4 });
+    expect(r.warnings.some((w) => w.includes('material under the channels'))).toBe(true);
+  });
+});
+
 describe('issue locations', () => {
   it('maps board coordinates into the preview layouts', () => {
     const r = build({ sides: 'both', mode: 'raised' });

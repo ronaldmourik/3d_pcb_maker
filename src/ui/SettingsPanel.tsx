@@ -145,6 +145,16 @@ export function SettingsPanel({ draft, onChange, hasTop, hasBottom, hasOutline, 
         )}
       </Section>
 
+      <Section title="Printer">
+        {bool('printCheck', 'Printability check', 'Warn about traces, pads, gaps and holes the nozzle cannot print.')}
+        {draft.printCheck && (
+          <>
+            {num('nozzleDiameter', 'Nozzle diameter', { step: 0.05, min: 0.1, hint: 'Features narrower than 2× the nozzle are reported.' })}
+            {num('minGap', 'Min gap between copper', { step: 0.05, min: 0, hint: 'Walls/gaps between separate copper areas.' })}
+          </>
+        )}
+      </Section>
+
       <Section title="Export quality">
         {num('meshTolerance', 'STL/3MF tolerance', { step: 0.005, min: 0.001 })}
         {num('angularTolerance', 'Angular tolerance', { step: 0.05, min: 0.01, unit: 'rad' })}

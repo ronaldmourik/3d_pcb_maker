@@ -55,6 +55,7 @@ export function previewShapes(r: BuildResult, opt: PreviewOptions): ShapeConfig[
     const singleBottom = !r.doubleSided && !!stampBottom;
     add(stampTop, (s) => s.translate(0, -(H + GAP), 0));
     add(stampBottom, (s) => s.translate(singleBottom ? 0 : W + GAP, -(H + GAP), 0));
+    out.push(...issueMarkers(r, opt));
     return out;
   }
 
@@ -89,6 +90,7 @@ export function previewShapes(r: BuildResult, opt: PreviewOptions): ShapeConfig[
       const [, z1] = zRange(s);
       return s.translateZ(bottom - GAP - z1);
     });
+  out.push(...issueMarkers(r, opt));
   return out;
 }
 
@@ -116,6 +118,15 @@ export function previewIssueSpots(r: BuildResult, opt: PreviewOptions): IssueSpo
     if (i.side === 'top') return { message: i.message, at: [x, y, topZ('topHalf')] };
     if (opt.layout === 'assembled') return { message: i.message, at: [x, y, -topZ('bottomHalf')] };
     return { message: i.message, at: [2 * cx - x + W + GAP, y, topZ('bottomHalf')] };
+  });
+}
+
+/** Red pins marking located issues (preview only, never exported). */
+function issueMarkers(r: BuildResult, opt: PreviewOptions): ShapeConfig[] {
+  return previewIssueSpots(r, opt).map((i) => {
+    const up = i.at[2] >= 0 ? 1 : -1;
+    const base: [number, number, number] = [i.at[0], i.at[1], up > 0 ? i.at[2] : i.at[2] - 1.5];
+    return { shape: makeCylinder(0.25, 1.5, base), name: `Issue: ${i.message}`, color: COLORS.issue };
   });
 }
 

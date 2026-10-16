@@ -70,13 +70,12 @@ describe('ketel_opto double-sided', () => {
     const t0 = Date.now();
     const first = buildModel(input(), base, undefined, cache);
     const tFirst = Date.now() - t0;
-    expect(first.cacheHits).toBe(0);
 
     // Only a stamp setting changes: outline, copper, holes and both halves come from the cache.
     const t1 = Date.now();
     const second = buildModel(input(), { ...base, stampEnabled: true }, undefined, cache);
     const tSecond = Date.now() - t1;
-    expect(second.cacheHits).toBeGreaterThanOrEqual(4);
+    expect(second.cacheHits).toBeGreaterThanOrEqual(first.cacheHits + 4);
     for (const id of ['topHalf', 'bottomHalf']) {
       const v = (r: typeof first) => measureVolume(r.parts.find((p) => p.id === id)!.bodies[0].shape);
       expect(v(second)).toBeCloseTo(v(first), 6);
@@ -92,7 +91,8 @@ describe('ketel_opto double-sided', () => {
 
     // A different input clears the cache.
     const other = buildModel(toBoardInput(fixtureLayers(['ketel_opto/ketel_opto-B_Cu.gbr', 'ketel_opto/ketel_opto-Edge_Cuts.gbr'])), { ...base, sides: 'bottom' }, undefined, cache);
-    expect(other.cacheHits).toBe(0);
+    // Only reuse within that build (the printability check reuses its own merged copper).
+    expect(other.cacheHits).toBeLessThan(second.cacheHits);
   });
 
   it('chamfers recessed channels on both halves', () => {

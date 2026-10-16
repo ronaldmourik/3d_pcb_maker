@@ -64,7 +64,7 @@ export default function App() {
                 {b.issues.map((i, k) => (
                   <li key={k}>
                     <button className="link" onClick={() => b.focusIssue(i)} title="Show in the preview">
-                      {i.message} at ({i.at[0].toFixed(1)}, {i.at[1].toFixed(1)})
+                      {i.message} at ({(i.at[0] + 0).toFixed(1)}, {(i.at[1] + 0).toFixed(1)})
                     </button>
                   </li>
                 ))}

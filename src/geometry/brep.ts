@@ -9,6 +9,7 @@ import { common, cutAll, fuseAll, isNullOrEmpty, isValid, prism, unify } from '.
 import { placeDowels } from './dowels';
 import { chamferTools, type ChamferStats } from './chamfer';
 import { GeometryCache, hashValue } from './cache';
+import { narrowGaps, narrowTraces, smallHoles, vanishedRegions } from './printability';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TopoShape = any;
@@ -56,6 +57,7 @@ export const COLORS = {
   copper: '#c87533',
   stamp: '#5b8dd9',
   dowel: '#8a8a8a',
+  issue: '#e53e3e',
 };
 
 const PART_LABELS: Record<PartId, string> = {
@@ -270,6 +272,35 @@ export function buildModel(
       const pins = dowelPositions.map((_, i) => makeCylinder(r, dowelLength, [bounds.maxX + 6 + r, bounds.minY + r + i * (2 * r + 3), 0]));
       const shape = pins.length === 1 ? pins[0] : as3D(cast(fuseAll(pins.map((p) => p.wrapped))));
       parts.push({ id: 'dowels', label: PART_LABELS.dowels, bodies: [{ name: 'Dowels', shape, color: COLORS.dowel }] });
+    }
+  }
+
+  // ---- printability check ----
+  if (s.printCheck) {
+    const copperSides: ('top' | 'bottom')[] = doubleSided ? ['top', 'bottom'] : [sides as 'top' | 'bottom'];
+    const n = s.nozzleDiameter;
+    for (const side of copperSides) {
+      staged(key(outlineKey, 'drc', side, s.copperOffset, n, s.minGap), (_warn, report) => {
+        log(`Checking ${side} copper printability`);
+        const prims = (side === 'top' ? input.top : input.bottom) ?? [];
+        const opts = { nozzle: n, minGap: s.minGap, copperOffset: s.copperOffset };
+        const found = [...narrowTraces(prims, opts)];
+        const cf = copperFace(side, s.copperOffset);
+        if (cf) {
+          const eroded = copperFace(side, s.copperOffset - n + 1e-3);
+          found.push(...vanishedRegions(cf, eroded, n, found.map((f) => f.at)));
+          found.push(...narrowGaps(cf, s.minGap));
+        }
+        for (const f of found) report({ ...f, side });
+      });
+    }
+    if (s.holes)
+      staged(key(holesKey, 'drc-holes', n), (_warn, report) => {
+        for (const h of smallHoles(input.drills, s.holeOffset, s.minHoleDiameter, n)) report({ ...h, side: copperSides[0] });
+      });
+    if (s.mode === 'recessed') {
+      const floor = (doubleSided ? T / 2 : T) - s.traceDepth;
+      if (floor < 0.3 + 1e-9) warnings.push(`Only ${floor.toFixed(2)} mm of material under the channels; use at least 0.3 mm.`);
     }
   }
 

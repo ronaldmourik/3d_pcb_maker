@@ -111,7 +111,8 @@ export function primitiveDrawings(p: Primitive, offset: number): Drawing[] {
         try {
           d = d.offset(offset, { lineJoinType: 'round' });
         } catch {
-          /* keep un-offset shape */
+          // Shrinking can make a shape vanish entirely; growing should never fail, keep the original then.
+          if (offset < 0) return [];
         }
       }
       return [d];
@@ -140,11 +141,15 @@ export function layerFace(prims: Primitive[], offset: number, stats: FaceStats, 
     const dark = prims[i].dark;
     const faces: TopoShape[] = [];
     while (i < prims.length && prims[i].dark === dark) {
+      const o = dark ? offset : -offset;
       try {
-        for (const d of primitiveDrawings(prims[i], dark ? offset : -offset)) faces.push(drawingFace(d));
+        for (const d of primitiveDrawings(prims[i], o)) faces.push(drawingFace(d));
       } catch {
-        stats.failed++;
-        (stats.failedAt ??= []).push(primitivePoint(prims[i]));
+        // A shape shrunk to nothing is expected, not a failure.
+        if (o >= 0) {
+          stats.failed++;
+          (stats.failedAt ??= []).push(primitivePoint(prims[i]));
+        }
       }
       i++;
       if (progress && (i % 50 === 0 || i === prims.length)) progress(i, prims.length);
