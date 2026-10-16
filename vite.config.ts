@@ -24,5 +24,5 @@ export default defineConfig({
   plugins: [react(), localOcctImport()],
   worker: { format: 'es' },
   optimizeDeps: { exclude: ['replicad-opencascadejs', 'online-3d-viewer'] },
-  test: { testTimeout: 120000, hookTimeout: 120000 },
+  test: { include: ['tests/**/*.test.ts'], testTimeout: 120000, hookTimeout: 120000 },
 });
