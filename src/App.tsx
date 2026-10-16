@@ -20,6 +20,7 @@ export default function App() {
         <LayerList layers={b.layers} onRole={b.setRole} onRemove={b.removeLayer} />
         {b.layers.length > 0 && !b.hasTop && !b.hasBottom && <p className="error">Assign at least one copper layer.</p>}
         <SettingsPanel
+          hasSilk={b.hasSilk}
           draft={b.draft}
           onChange={b.setDraft}
           hasTop={b.hasTop}

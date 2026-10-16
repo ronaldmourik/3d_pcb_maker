@@ -20,7 +20,7 @@ export type Primitive =
   /** Arbitrary filled shape: rect/obround/polygon pads, macros, regions. */
   | { kind: 'contour'; dark: boolean; outer: Contour; holes?: Contour[] };
 
-export type LayerRole = 'top-copper' | 'bottom-copper' | 'outline' | 'drill' | 'ignore';
+export type LayerRole = 'top-copper' | 'bottom-copper' | 'silk-top' | 'silk-bottom' | 'outline' | 'drill' | 'ignore';
 
 export interface Drill {
   /** Center of a round hole, or start of a slot. */
@@ -49,6 +49,8 @@ export interface BoardInput {
   name: string;
   top: Primitive[] | null;
   bottom: Primitive[] | null;
+  silkTop?: Primitive[] | null;
+  silkBottom?: Primitive[] | null;
   outline: Primitive[] | null;
   drills: Drill[];
 }

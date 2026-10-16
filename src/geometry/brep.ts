@@ -129,6 +129,7 @@ export function buildModel(
       if (hasTop) primitivesBounds(input.top!, b);
       if (hasBottom) primitivesBounds(input.bottom!, b);
       drillsBounds(input.drills, b);
+      for (const silk of [input.silkTop, input.silkBottom]) if (silk) primitivesBounds(silk, b);
       if (isEmpty(b)) throw new Error('Nothing to build: the layers are empty.');
       const m = s.margin;
       shapes = [{ outer: rectContour(b.minX - m, b.minY - m, b.maxX + m, b.maxY + m), holes: [] }];
@@ -227,6 +228,24 @@ export function buildModel(
     return copper;
   };
 
+  /** Silkscreen of one side: strokes widened to a printable width, kept clear of copper and the outline. */
+  const silkFace = (side: 'top' | 'bottom'): TopoShape | null => {
+    const prims = (side === 'top' ? input.silkTop : input.silkBottom) ?? [];
+    if (s.silkMode === 'off' || !prims.some((p) => p.dark)) return null;
+    return staged(key(outlineKey, 'silk', side, s.silkMinWidth, s.silkClearance, s.copperOffset), (warn) => {
+      log(`Merging ${side} silkscreen`);
+      const wide = prims.map((p) => (p.kind === 'stroke' && p.width < s.silkMinWidth ? { ...p, width: s.silkMinWidth } : p));
+      const st: FaceStats = { failed: 0 };
+      let f = layerFace(wide, 0, st);
+      if (st.failed) warn(`${st.failed} silkscreen shape(s) could not be converted and were skipped.`);
+      if (!f) return null;
+      const keepOut = copperFace(side, s.copperOffset + s.silkClearance);
+      if (keepOut) f = cutAll(f, [keepOut]);
+      f = unify(common(f, outlineFace));
+      return isNullOrEmpty(f) ? null : f;
+    });
+  };
+
   // ---- board / halves ----
   const buildSlab = (thickness: number, side: 'top' | 'bottom', socketsFace: TopoShape | null, socketDepth: number, warn: Warn, report: Report) => {
     let board = as3D(prism(outlineFace, 0, thickness));
@@ -248,6 +267,15 @@ export function buildModel(
     } else {
       warn(`The ${side} copper layer is empty after clipping to the outline.`);
     }
+    const silk = silkFace(side);
+    if (silk) {
+      const depth = Math.min(s.silkDepth, thickness - socketDepth - 0.3);
+      if (s.silkMode === 'emboss' && s.mode === 'raised') board = board.fuse(as3D(prism(silk, thickness, s.silkDepth)));
+      else if (depth > 0.05) {
+        if (s.silkMode === 'emboss') warn('Embossed silkscreen would be sanded off in recessed mode; it is engraved instead.');
+        board = board.cut(as3D(prism(silk, thickness - depth, depth + 1)));
+      }
+    }
     if (socketsFace) board = board.cut(as3D(prism(socketsFace, -1, socketDepth + 1)));
     if (holesSolid) {
       board = board.cut(as3D(holesSolid));
@@ -258,7 +286,8 @@ export function buildModel(
   const slab = (thickness: number, side: 'top' | 'bottom', socketsFace: TopoShape | null, socketDepth: number, socketsKey = '') => {
     const featureH = s.mode === 'recessed' ? s.traceDepth : s.traceHeight;
     const chamfer = s.channelChamfer;
-    const k = key(outlineKey, holesKey, 'slab', thickness, side, s.mode, featureH, chamfer, s.copperOffset, socketsKey, socketDepth);
+    const silkKey = key(s.silkMode, s.silkDepth, s.silkMinWidth, s.silkClearance);
+    const k = key(outlineKey, holesKey, 'slab', thickness, side, s.mode, featureH, chamfer, s.copperOffset, socketsKey, socketDepth, silkKey);
     const r = staged(k, (warn, report) => buildSlab(thickness, side, socketsFace, socketDepth, warn, report));
     return { board: r.board.clone(), copper: r.copper ? r.copper.clone() : null };
   };

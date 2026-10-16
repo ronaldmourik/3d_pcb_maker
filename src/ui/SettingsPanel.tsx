@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import type { Settings } from '../state/settings';
 
 interface Props {
+  hasSilk: boolean;
   draft: Settings;
   onChange: (s: Settings) => void;
   hasTop: boolean;
@@ -16,7 +17,7 @@ interface Props {
 type NumKey = { [K in keyof Settings]: Settings[K] extends number ? K : never }[keyof Settings];
 type BoolKey = { [K in keyof Settings]: Settings[K] extends boolean ? K : never }[keyof Settings];
 
-export function SettingsPanel({ draft, onChange, hasTop, hasBottom, hasOutline, dirty, canApply, onApply, onReset }: Props) {
+export function SettingsPanel({ hasSilk, draft, onChange, hasTop, hasBottom, hasOutline, dirty, canApply, onApply, onReset }: Props) {
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => onChange({ ...draft, [k]: v });
   const num = (k: NumKey, label: string, opts: { step?: number; min?: number; max?: number; unit?: string; hint?: string } = {}) => (
     <label className="field" title={opts.hint}>
@@ -114,6 +115,28 @@ export function SettingsPanel({ draft, onChange, hasTop, hasBottom, hasOutline, 
               {num('dowelDepth', 'Socket depth per half', { step: 0.1, min: 0.3 })}
               {num('dowelClearance', 'Socket clearance', { step: 0.05, min: 0 })}
               {num('dowelEdgeMargin', 'Keep-out margin', { step: 0.5, min: 0 })}
+            </>
+          )}
+        </Section>
+      )}
+
+      {hasSilk && (
+        <Section title="Silkscreen">
+          <label className="field">
+            <span>Marks</span>
+            <select value={draft.silkMode} onChange={(e) => set('silkMode', e.target.value as Settings['silkMode'])}>
+              <option value="off">Off</option>
+              <option value="engrave">Engraved</option>
+              <option value="emboss" disabled={recessed}>
+                Embossed{recessed ? ' (raised mode only)' : ''}
+              </option>
+            </select>
+          </label>
+          {draft.silkMode !== 'off' && (
+            <>
+              {num('silkDepth', draft.silkMode === 'emboss' ? 'Height' : 'Depth', { step: 0.05, min: 0.1 })}
+              {num('silkMinWidth', 'Min line width', { step: 0.05, min: 0.1, hint: 'Thinner silkscreen lines (text) are widened to this.' })}
+              {num('silkClearance', 'Clearance to copper', { step: 0.05, min: 0 })}
             </>
           )}
         </Section>

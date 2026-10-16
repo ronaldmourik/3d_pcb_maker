@@ -45,6 +45,12 @@ export interface Settings {
   angularTolerance: number;
   mergeBodies: boolean;
 
+  /** Silkscreen marks on the copper face. */
+  silkMode: 'off' | 'engrave' | 'emboss';
+  silkDepth: number;
+  silkClearance: number;
+  silkMinWidth: number;
+
   /** Printability check against the printer nozzle. */
   printCheck: boolean;
   nozzleDiameter: number;
@@ -90,6 +96,11 @@ export const defaultSettings: Settings = {
   meshTolerance: 0.01,
   angularTolerance: 0.1,
   mergeBodies: false,
+
+  silkMode: 'engrave',
+  silkDepth: 0.3,
+  silkClearance: 0.3,
+  silkMinWidth: 0.4,
 
   printCheck: true,
   nozzleDiameter: 0.4,

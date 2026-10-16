@@ -57,11 +57,14 @@ export function identifyRole(fileName: string, fileFunction?: string): LayerRole
       return 'ignore'; // inner layer
     }
     if (ff.startsWith('profile')) return 'outline';
+    if (ff.startsWith('legend')) return ff.includes(',bot') ? 'silk-bottom' : 'silk-top';
     if (ff.startsWith('plated') || ff.startsWith('nonplated')) return 'drill';
     return 'ignore';
   }
   const n = fileName.toLowerCase();
   if (/edge[_.\s-]?cuts|\.gko$|\.gm1?$|\.gml$|outline|profile|\.oln$/.test(n)) return 'outline';
+  if (/(^|[-_.])f[_.]silk(s|screen)?\b|\.gto$|top[-_.]?silk/.test(n)) return 'silk-top';
+  if (/(^|[-_.])b[_.]silk(s|screen)?\b|\.gbo$|bottom[-_.]?silk/.test(n)) return 'silk-bottom';
   if (/(^|[-_.])f[_.]cu\b|\.gtl$|\.cmp$|top[-_.]?(layer|copper)|copper[-_.]?top/.test(n)) return 'top-copper';
   if (/(^|[-_.])b[_.]cu\b|\.gbl$|\.sol$|bottom[-_.]?(layer|copper)|copper[-_.]?bottom/.test(n)) return 'bottom-copper';
   return 'ignore';
@@ -87,6 +90,8 @@ export function toBoardInput(layers: ParsedLayer[]): BoardInput {
     top: pick('top-copper'),
     bottom: pick('bottom-copper'),
     outline: pick('outline'),
+    silkTop: pick('silk-top'),
+    silkBottom: pick('silk-bottom'),
     drills: layers.filter((l) => l.role === 'drill').flatMap((l) => l.drills),
   };
 }

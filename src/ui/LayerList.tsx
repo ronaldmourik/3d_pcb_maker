@@ -3,6 +3,8 @@ import type { LayerRole, ParsedLayer } from '../gerber/types';
 const ROLES: { value: LayerRole; label: string }[] = [
   { value: 'top-copper', label: 'Top copper' },
   { value: 'bottom-copper', label: 'Bottom copper' },
+  { value: 'silk-top', label: 'Top silkscreen' },
+  { value: 'silk-bottom', label: 'Bottom silkscreen' },
   { value: 'outline', label: 'Board outline' },
   { value: 'drill', label: 'Drill' },
   { value: 'ignore', label: 'Ignore' },

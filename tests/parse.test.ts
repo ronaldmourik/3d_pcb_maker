@@ -21,7 +21,7 @@ describe('layer identification', () => {
     expect(identifyRole('board.GTL')).toBe('top-copper');
     expect(identifyRole('board.GBL')).toBe('bottom-copper');
     expect(identifyRole('board.GKO')).toBe('outline');
-    expect(identifyRole('board-F_Silkscreen.gbr')).toBe('ignore');
+    expect(identifyRole('board-F_Mask.gbr')).toBe('ignore');
     expect(identifyRole('x', 'Copper,L2,Inr')).toBe('ignore');
   });
   it('derives the board name', () => {

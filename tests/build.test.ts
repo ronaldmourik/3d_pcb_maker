@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { unzipSync, strFromU8 } from 'fflate';
 import { measureArea, measureVolume } from 'replicad';
 import { fixtureInput, initOC } from './helpers';
-import { parseLayerFile, toBoardInput } from '../src/gerber/loadFiles';
+import { identifyRole, parseLayerFile, toBoardInput } from '../src/gerber/loadFiles';
 import { patternBounds } from '../src/export/paths2d';
 import { buildModel, type BuildResult } from '../src/geometry/brep';
 import { exportParts, previewIssueSpots, previewStep } from '../src/geometry/output';
@@ -228,6 +228,49 @@ describe('printability check', () => {
   it('warns about a thin channel floor', () => {
     const r = build({ sides: 'top', mode: 'recessed', boardThickness: 0.6, traceDepth: 0.4 });
     expect(r.warnings.some((w) => w.includes('material under the channels'))).toBe(true);
+  });
+});
+
+describe('silkscreen marks', () => {
+  const nl = String.fromCharCode(10);
+  // Copper: one pad at (0,0). Silk: a 10 mm stroke well away from it, or crossing it.
+  const copper = ['%FSLAX46Y46*%', '%MOMM*%', '%ADD10C,2.0*%', 'D10*', 'X0Y0D03*', 'M02*'].join(nl);
+  const silk = (width: number, y: number) =>
+    ['%FSLAX46Y46*%', '%MOMM*%', `%ADD10C,${width}*%`, 'D10*', `X-5000000Y${y * 1e6}D02*`, `X5000000Y${y * 1e6}D01*`, 'M02*'].join(nl);
+  const input = (width: number, y: number) =>
+    toBoardInput([parseLayerFile('s-F_Cu.gbr', copper), parseLayerFile('s-F_Silkscreen.gbr', silk(width, y))]);
+  const boardVol = (width: number, y: number, over: Partial<Settings> = {}) =>
+    measureVolume(buildModel(input(width, y), { ...defaultSettings, sides: 'top', mode: 'raised', margin: 3, holes: false, ...over }).parts[0].bodies[0].shape);
+
+  it('detects silkscreen layers', () => {
+    expect(identifyRole('b-F_Silkscreen.gbr')).toBe('silk-top');
+    expect(identifyRole('b-B_SilkS.gbr')).toBe('silk-bottom');
+    expect(identifyRole('board.GTO')).toBe('silk-top');
+    expect(identifyRole('x', 'Legend,Bot')).toBe('silk-bottom');
+  });
+
+  it('engraves the silkscreen to the set depth', () => {
+    const off = boardVol(0.5, 3, { silkMode: 'off' });
+    const engraved = boardVol(0.5, 3);
+    expect(off - engraved).toBeCloseTo((10 * 0.5 + Math.PI * 0.25 ** 2) * 0.3, 4);
+  });
+
+  it('widens thin lines to the minimum width', () => {
+    const off = boardVol(0.15, 3, { silkMode: 'off' });
+    expect(off - boardVol(0.15, 3)).toBeCloseTo((10 * 0.4 + Math.PI * 0.2 ** 2) * 0.3, 4);
+  });
+
+  it('keeps clear of copper', () => {
+    // Crossing the pad: the part within pad radius + clearance (1.3 mm) is not engraved.
+    const removed = boardVol(0.5, 0, { silkMode: 'off' }) - boardVol(0.5, 0);
+    const full = (10 * 0.5 + Math.PI * 0.25 ** 2) * 0.3;
+    expect(removed).toBeLessThan(full - 2 * 1.2 * 0.5 * 0.3);
+    expect(removed).toBeGreaterThan(full - 2 * 1.3 * 0.5 * 0.3 - 0.05);
+  });
+
+  it('embosses in raised mode', () => {
+    const off = boardVol(0.5, 3, { silkMode: 'off' });
+    expect(boardVol(0.5, 3, { silkMode: 'emboss' }) - off).toBeCloseTo((10 * 0.5 + Math.PI * 0.25 ** 2) * 0.3, 4);
   });
 });
 
