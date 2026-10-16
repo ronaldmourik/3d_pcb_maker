@@ -3,6 +3,7 @@ import { unzipSync, strFromU8 } from 'fflate';
 import { measureArea, measureVolume } from 'replicad';
 import { fixtureInput, initOC } from './helpers';
 import { parseLayerFile, toBoardInput } from '../src/gerber/loadFiles';
+import { patternBounds } from '../src/export/paths2d';
 import { buildModel, type BuildResult } from '../src/geometry/brep';
 import { exportParts, previewIssueSpots, previewStep } from '../src/geometry/output';
 import { isValid } from '../src/geometry/occ';
@@ -200,6 +201,57 @@ describe('printability check', () => {
   it('warns about a thin channel floor', () => {
     const r = build({ sides: 'top', mode: 'recessed', boardThickness: 0.6, traceDepth: 0.4 });
     expect(r.warnings.some((w) => w.includes('material under the channels'))).toBe(true);
+  });
+});
+
+describe('copper cut patterns (SVG / DXF)', () => {
+  const trace = () =>
+    toBoardInput([
+      parseLayerFile('t-F_Cu.gbr', ['%FSLAX46Y46*%', '%MOMM*%', '%ADD10C,1.0*%', 'D10*', 'X0Y0D02*', 'X10000000Y0D01*', 'M02*'].join(String.fromCharCode(10))),
+    ]);
+  const text = async (p: Promise<{ data: Uint8Array }>) => new TextDecoder().decode((await p).data);
+
+  it('extracts the exact copper outline with arcs', () => {
+    const r = buildModel(trace(), { ...defaultSettings, sides: 'top', margin: 1 });
+    const p = r.cutPatterns.top!;
+    expect(p.copper).toHaveLength(1);
+    const kinds = p.copper[0].map((s) => s.type).sort();
+    expect(kinds).toEqual(['arc', 'arc', 'line', 'line']);
+    const b = patternBounds({ ...p, outline: [], holes: [], slots: [] });
+    expect([b.minX, b.minY, b.maxX, b.maxY].map((v) => +v.toFixed(6) + 0)).toEqual([-0.5, -0.5, 10.5, 0.5]);
+  });
+
+  it('writes DXF lines and counter-clockwise arcs', async () => {
+    const r = buildModel(trace(), { ...defaultSettings, sides: 'top', margin: 1 });
+    const dxf = await text(exportParts(r, 'copperTop', 'dxf', 0.01, 0.1));
+    const lines = dxf.split('\n');
+    const entities = lines.flatMap((l, i) => (l === '0' && ['LINE', 'ARC', 'CIRCLE'].includes(lines[i + 1]) ? [[lines[i + 1], lines[i + 3]]] : []));
+    expect(entities.filter(([, layer]) => layer === 'COPPER').map(([t]) => t).sort()).toEqual(['ARC', 'ARC', 'LINE', 'LINE']);
+    expect(entities.filter(([, layer]) => layer === 'OUTLINE')).toHaveLength(4);
+    // Arc caps: right cap runs 270°→90°, left cap 90°→270° (counter-clockwise in DXF).
+    const arcs = lines.flatMap((l, i) => (l === 'ARC' ? [[+lines[i + 12], +lines[i + 14]]] : []));
+    expect(arcs.map(([a, b]) => [Math.round(a), Math.round(b)]).sort()).toEqual([
+      [270, 90],
+      [90, 270],
+    ]);
+    expect(dxf.trim().endsWith('EOF')).toBe(true);
+  });
+
+  it('writes a 1:1 SVG in millimetres', async () => {
+    const r = buildModel(trace(), { ...defaultSettings, sides: 'top', margin: 1 });
+    const svg = await text(exportParts(r, 'copperTop', 'svg', 0.01, 0.1));
+    // Board box -1.5..11.5 × -1.5..1.5 plus 2 mm margin on each side.
+    expect(svg).toContain('width="17mm" height="7mm" viewBox="0 0 17 7"');
+    const copper = /<g id="copper"[^>]*>([\s\S]*?)<\/g>/.exec(svg)![1];
+    expect(copper.match(/A0\.5 0\.5/g)).toHaveLength(2);
+  });
+
+  it('orients bottom patterns as printed and can mirror them again', () => {
+    const r = build({ sides: 'both', mode: 'raised' });
+    // The slot at x≈138 (board centre 120) is at x≈102 on the mirrored bottom pattern.
+    const slotX = (p: NonNullable<typeof r.cutPatterns.top>) => p.slots[0][0].a[0];
+    expect(slotX(r.cutPatterns.top!)).toBeGreaterThan(137);
+    expect(slotX(r.cutPatterns.bottom!)).toBeLessThan(103);
   });
 });
 

@@ -6,8 +6,14 @@ import { COLORS } from './brep';
 import { tessellate } from '../export/mesh';
 import { writeStl } from '../export/stl';
 import { write3mf } from '../export/threemf';
+import { writeSvg } from '../export/svg';
+import { writeDxf } from '../export/dxf';
+import { mapPattern } from '../export/paths2d';
 
-export type ExportFormat = 'step' | 'stl' | '3mf';
+export type ExportFormat = 'step' | 'stl' | '3mf' | 'svg' | 'dxf';
+export type ExportTarget = PartId | 'all' | 'copperTop' | 'copperBottom';
+
+export const isCutFormat = (f: ExportFormat) => f === 'svg' || f === 'dxf';
 export type PreviewLayout = 'print' | 'assembled';
 
 export interface PreviewOptions {
@@ -142,14 +148,35 @@ function partFile(r: BuildResult, p: Part, format: ExportFormat, tol: number, an
   return { name: `${base}.3mf`, data: write3mf(meshes, base) };
 }
 
+function patternFile(r: BuildResult, side: 'top' | 'bottom', format: ExportFormat, mirror: boolean): { name: string; data: Uint8Array } {
+  let p = r.cutPatterns[side];
+  if (!p) throw new Error(`No ${side} copper pattern available`);
+  if (mirror) {
+    const cx = (r.bounds.minX + r.bounds.maxX) / 2;
+    p = mapPattern(p, (q) => [2 * cx - q[0], q[1]]);
+  }
+  const base = `${r.name}-copper-${side}${mirror ? '-mirrored' : ''}`;
+  const text = format === 'svg' ? writeSvg(p, base) : writeDxf(p);
+  return { name: `${base}.${format}`, data: new TextEncoder().encode(text) };
+}
+
 export async function exportParts(
   r: BuildResult,
-  partId: PartId | 'all',
+  partId: ExportTarget,
   format: ExportFormat,
   tol: number,
   angTol: number,
+  opts: { mirror?: boolean } = {},
 ): Promise<{ name: string; data: Uint8Array }> {
   const toBytes = async (d: Uint8Array | Blob) => (d instanceof Blob ? new Uint8Array(await d.arrayBuffer()) : d);
+  if (isCutFormat(format)) {
+    const sides: ('top' | 'bottom')[] =
+      partId === 'copperTop' ? ['top'] : partId === 'copperBottom' ? ['bottom'] : (Object.keys(r.cutPatterns) as ('top' | 'bottom')[]);
+    const files = sides.map((side) => patternFile(r, side, format, !!opts.mirror));
+    if (files.length === 1) return files[0];
+    return { name: `${r.name}-copper-${format}.zip`, data: zipSync(Object.fromEntries(files.map((f) => [f.name, f.data]))) };
+  }
+  if (partId === 'copperTop' || partId === 'copperBottom') throw new Error('Copper patterns export as SVG or DXF');
   if (partId !== 'all') {
     const p = r.parts.find((x) => x.id === partId);
     if (!p) throw new Error(`Part ${partId} not available`);

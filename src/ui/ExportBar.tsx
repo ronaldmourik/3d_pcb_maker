@@ -1,36 +1,67 @@
 import { useEffect, useState } from 'react';
 import type { PartInfo } from '../geometry/protocol';
-import type { PartId } from '../geometry/brep';
-import type { ExportFormat } from '../geometry/output';
+import { isCutFormat, type ExportFormat, type ExportTarget } from '../geometry/output';
 
 interface Props {
   parts: PartInfo[];
+  copperSides: ('top' | 'bottom')[];
   busy: boolean;
-  onExport: (part: PartId | 'all', format: ExportFormat) => void;
+  onExport: (target: ExportTarget, format: ExportFormat, mirror: boolean) => void;
 }
 
-export function ExportBar({ parts, busy, onExport }: Props) {
-  const [part, setPart] = useState<PartId | 'all'>('all');
+const SOLID_FORMATS: { value: ExportFormat; label: string }[] = [
+  { value: 'step', label: 'STEP' },
+  { value: 'stl', label: 'STL' },
+  { value: '3mf', label: '3MF' },
+];
+const CUT_FORMATS: { value: ExportFormat; label: string }[] = [
+  { value: 'svg', label: 'SVG' },
+  { value: 'dxf', label: 'DXF' },
+];
+
+export function ExportBar({ parts, copperSides, busy, onExport }: Props) {
+  const [target, setTarget] = useState<ExportTarget>('all');
   const [format, setFormat] = useState<ExportFormat>('step');
+  const [mirror, setMirror] = useState(false);
+
+  const targets: { value: ExportTarget; label: string }[] = [
+    ...(parts.length > 1 ? [{ value: 'all' as const, label: 'All parts (zip)' }] : []),
+    ...parts.map((p) => ({ value: p.id, label: p.label })),
+    ...copperSides.map((s) => ({ value: (s === 'top' ? 'copperTop' : 'copperBottom') as ExportTarget, label: `Copper pattern (${s})` })),
+  ];
+  const isCopper = target === 'copperTop' || target === 'copperBottom';
+  const formats = isCopper ? CUT_FORMATS : SOLID_FORMATS;
+
   useEffect(() => {
-    if (part !== 'all' && !parts.some((p) => p.id === part)) setPart(parts.length === 1 ? parts[0].id : 'all');
-  }, [parts, part]);
+    if (!targets.some((t) => t.value === target) && targets.length) setTarget(targets[0].value);
+  }, [targets, target]);
+  useEffect(() => {
+    if (!formats.some((f) => f.value === format)) setFormat(formats[0].value);
+  }, [formats, format]);
+
   return (
     <div className="export-bar">
-      <select value={part} onChange={(e) => setPart(e.target.value as PartId | 'all')} disabled={!parts.length}>
-        {parts.length > 1 && <option value="all">All parts (zip)</option>}
-        {parts.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.label}
+      <select value={target} onChange={(e) => setTarget(e.target.value as ExportTarget)} disabled={!targets.length}>
+        {targets.map((t) => (
+          <option key={t.value} value={t.value}>
+            {t.label}
           </option>
         ))}
       </select>
       <select value={format} onChange={(e) => setFormat(e.target.value as ExportFormat)}>
-        <option value="step">STEP</option>
-        <option value="stl">STL</option>
-        <option value="3mf">3MF</option>
+        {formats.map((f) => (
+          <option key={f.value} value={f.value}>
+            {f.label}
+          </option>
+        ))}
       </select>
-      <button className="primary" disabled={!parts.length || busy} onClick={() => onExport(parts.length === 1 ? parts[0].id : part, format)}>
+      {isCutFormat(format) && (
+        <label className="check" title="Mirror the pattern, e.g. when the cutter cuts the tape from the back">
+          <input type="checkbox" checked={mirror} onChange={(e) => setMirror(e.target.checked)} />
+          <span>Mirror</span>
+        </label>
+      )}
+      <button className="primary" disabled={!targets.length || busy} onClick={() => onExport(target, format, mirror)}>
         Download
       </button>
     </div>

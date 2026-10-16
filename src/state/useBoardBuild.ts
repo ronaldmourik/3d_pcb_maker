@@ -2,8 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { GeometryClient } from '../geometry/client';
 import type { PartInfo, WorkerResponse } from '../geometry/protocol';
-import type { PartId } from '../geometry/brep';
-import type { ExportFormat, IssueSpot, PreviewOptions } from '../geometry/output';
+import type { ExportFormat, ExportTarget, IssueSpot, PreviewOptions } from '../geometry/output';
 import { parseRawFiles, readUploads, toBoardInput } from '../gerber/loadFiles';
 import type { LayerRole, ParsedLayer } from '../gerber/types';
 import { defaultSettings, settingsEqual, type Settings } from './settings';
@@ -18,7 +17,7 @@ interface Applied {
 // One worker for the whole app (StrictMode would otherwise spawn two in development).
 const client = new GeometryClient();
 
-const MIME: Record<string, string> = { zip: 'application/zip', '3mf': 'model/3mf', stl: 'model/stl', step: 'model/step' };
+const MIME: Record<string, string> = { zip: 'application/zip', '3mf': 'model/3mf', stl: 'model/stl', step: 'model/step', svg: 'image/svg+xml', dxf: 'image/vnd.dxf' };
 
 function download(name: string, data: ArrayBuffer) {
   const ext = name.split('.').pop() ?? '';
@@ -39,6 +38,7 @@ export function useBoardBuild() {
   const [preview, setPreview] = useState<PreviewOptions>({ layout: 'print', showStamps: true });
   const [step, setStep] = useState<ArrayBuffer | null>(null);
   const [parts, setParts] = useState<PartInfo[]>([]);
+  const [copperSides, setCopperSides] = useState<('top' | 'bottom')[]>([]);
   const [doubleSided, setDoubleSided] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [issues, setIssues] = useState<IssueSpot[]>([]);
@@ -79,6 +79,7 @@ export function useBoardBuild() {
       );
       setStep(res.step);
       setParts(res.parts);
+      setCopperSides(res.copperSides);
       setWarnings(res.warnings);
       setIssues(res.issues);
       setDoubleSided(res.doubleSided);
@@ -152,7 +153,7 @@ export function useBoardBuild() {
     }
   };
 
-  const exportPart = async (part: PartId | 'all', format: ExportFormat) => {
+  const exportPart = async (part: ExportTarget, format: ExportFormat, mirror = false) => {
     if (!applied) return;
     setBusy(`Exporting ${format.toUpperCase()}`);
     try {
@@ -162,6 +163,7 @@ export function useBoardBuild() {
         format,
         tolerance: applied.settings.meshTolerance,
         angularTolerance: applied.settings.angularTolerance,
+        mirror,
       });
       download(res.name, res.data);
     } catch (e) {
@@ -184,6 +186,7 @@ export function useBoardBuild() {
     preview,
     step,
     parts,
+    copperSides,
     warnings,
     issues,
     focus,

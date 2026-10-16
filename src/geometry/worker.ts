@@ -46,6 +46,7 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
           ms: Math.round(performance.now() - t0),
           cacheHits: current.cacheHits,
           issues: previewIssueSpots(current, msg.preview),
+          copperSides: Object.keys(current.cutPatterns) as ('top' | 'bottom')[],
         },
         [step],
       );
@@ -55,7 +56,7 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
       post({ type: 'preview', id: msg.id, step, issues: previewIssueSpots(current, msg.preview) }, [step]);
     } else if (msg.type === 'export') {
       if (!current) throw new Error('Nothing built yet');
-      const f = await exportParts(current, msg.part, msg.format, msg.tolerance, msg.angularTolerance);
+      const f = await exportParts(current, msg.part, msg.format, msg.tolerance, msg.angularTolerance, { mirror: msg.mirror });
       const data = f.data.slice().buffer as ArrayBuffer;
       post({ type: 'file', id: msg.id, name: f.name, data }, [data]);
     }

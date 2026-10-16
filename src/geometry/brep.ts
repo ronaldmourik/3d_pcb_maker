@@ -10,6 +10,8 @@ import { placeDowels } from './dowels';
 import { chamferTools, type ChamferStats } from './chamfer';
 import { GeometryCache, hashValue } from './cache';
 import { narrowGaps, narrowTraces, smallHoles, vanishedRegions } from './printability';
+import { faceLoops } from './paths';
+import { mapPattern, type CutPattern, type PathSeg } from '../export/paths2d';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TopoShape = any;
@@ -50,6 +52,8 @@ export interface BuildResult {
   /** Stages reused from the geometry cache in this build. */
   cacheHits: number;
   issues: Issue[];
+  /** Copper cut patterns per side, oriented as on the printed part (copper face up). */
+  cutPatterns: Partial<Record<'top' | 'bottom', CutPattern>>;
 }
 
 export const COLORS = {
@@ -304,6 +308,28 @@ export function buildModel(
     }
   }
 
+  // ---- 2D cut patterns (vinyl cutter) ----
+  const cutPatterns: Partial<Record<'top' | 'bottom', CutPattern>> = {};
+  for (const side of (doubleSided ? ['top', 'bottom'] : [sides]) as ('top' | 'bottom')[]) {
+    cutPatterns[side] = staged(key(outlineKey, holesKey, 'pattern', side, s.copperOffset), () => {
+      const pattern: CutPattern = {
+        copper: faceLoops(copperFace(side, s.copperOffset)),
+        outline: faceLoops(outlineFace),
+        holes: [],
+        slots: [],
+      };
+      if (s.holes)
+        for (const d of input.drills) {
+          if (d.diameter < s.minHoleDiameter) continue;
+          const r = (d.diameter + s.holeOffset) / 2;
+          if (d.to) pattern.slots.push(slotLoop(d.at, d.to, r));
+          else pattern.holes.push({ c: d.at, r });
+        }
+      // Bottom copper is printed mirrored (copper face up).
+      return side === 'bottom' ? mapPattern(pattern, (q) => [2 * cx - q[0], q[1]]) : pattern;
+    });
+  }
+
   // ---- press stamps ----
   if (s.stampEnabled) {
     const stampSides: ('top' | 'bottom')[] = doubleSided ? ['top', 'bottom'] : [sides as 'top' | 'bottom'];
@@ -391,6 +417,7 @@ export function buildModel(
     dowelDiameter: s.dowelDiameter,
     cacheHits: cache.hits,
     issues,
+    cutPatterns,
   };
 }
 
@@ -404,4 +431,19 @@ function rectContour(x0: number, y0: number, x1: number, y1: number): Contour {
       { type: 'line', end: [x0, y0] },
     ],
   };
+}
+
+function slotLoop(a: Pt, b: Pt, r: number): PathSeg[] {
+  const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+  const ux = (b[0] - a[0]) / L;
+  const uy = (b[1] - a[1]) / L;
+  const nx = -uy * r;
+  const ny = ux * r;
+  const p = (q: Pt, sx: number, sy: number): Pt => [q[0] + sx, q[1] + sy];
+  return [
+    { type: 'line', a: p(a, nx, ny), b: p(b, nx, ny) },
+    { type: 'arc', a: p(b, nx, ny), m: p(b, ux * r, uy * r), b: p(b, -nx, -ny) },
+    { type: 'line', a: p(b, -nx, -ny), b: p(a, -nx, -ny) },
+    { type: 'arc', a: p(a, -nx, -ny), m: p(a, -ux * r, -uy * r), b: p(a, nx, ny) },
+  ];
 }
