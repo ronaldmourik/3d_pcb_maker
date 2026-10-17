@@ -2,7 +2,7 @@
 import { draw, drawCircle, makeFace, type Drawing, type Wire } from 'replicad';
 import type { Contour, Drill, Primitive, Pt } from '../gerber/types';
 import { arcSweep, samePt } from '../gerber/gerber';
-import { cutAll, drawingFace, facesUp, fuseAll, unify } from './occ';
+import { cutAll, drawingFace, facesUp, fuseAll, offsetFace, unify } from './occ';
 import { contourPoints, polygonArea } from '../gerber/geom2d';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -12,11 +12,43 @@ const EPS = 1e-4;
 
 const polar = (c: Pt, r: number, a: number): Pt => [c[0] + r * Math.cos(a), c[1] + r * Math.sin(a)];
 
-export function contourDrawing(c: Contour): Drawing {
+/** Max distance of a vertex from the line through its neighbours for it to be dropped. */
+const COLLINEAR = 1e-5;
+
+/**
+ * Drop zero-length lines and vertices (almost) on the straight line between their neighbours. KiCad pours have
+ * such vertices; OpenCascade booleans then merge the two walls into one plane the vertex lies just off of,
+ * which is an invalid face.
+ */
+export function cleanContour(c: Contour): Contour {
+  const segs: Contour['segs'] = [];
+  let cur = c.start;
+  for (const s of c.segs) {
+    if (s.type === 'line' && samePt(cur, s.end, EPS)) continue;
+    const prev = segs[segs.length - 1];
+    if (s.type === 'line' && prev?.type === 'line') {
+      const a = segs.length > 1 ? segs[segs.length - 2].end : c.start;
+      const v = prev.end;
+      const [dx, dy] = [s.end[0] - a[0], s.end[1] - a[1]];
+      const L = Math.hypot(dx, dy);
+      const between = (v[0] - a[0]) * dx + (v[1] - a[1]) * dy > 0 && (s.end[0] - v[0]) * dx + (s.end[1] - v[1]) * dy > 0;
+      if (L > EPS && between && Math.abs(dx * (v[1] - a[1]) - dy * (v[0] - a[0])) / L < COLLINEAR) {
+        segs[segs.length - 1] = s;
+        cur = s.end;
+        continue;
+      }
+    }
+    segs.push(s);
+    cur = s.end;
+  }
+  return { start: c.start, segs };
+}
+
+export function contourDrawing(contour: Contour): Drawing {
+  const c = cleanContour(contour);
   const pen = draw(c.start);
   let cur = c.start;
   for (const s of c.segs) {
-    if (samePt(cur, s.end, EPS) && s.type === 'line') continue;
     if (s.type === 'line') {
       pen.lineTo(s.end);
     } else {
@@ -192,12 +224,16 @@ export function circlesFace(centers: Pt[], r: number): TopoShape | null {
 
 /** Faces of one primitive. Regions with many holes (pours) are built straight from wires: much faster. */
 export function primitiveFaces(p: Primitive, offset: number): TopoShape[] {
-  if (p.kind === 'contour' && p.holes?.length && Math.abs(offset) <= EPS) {
+  if (p.kind === 'contour' && p.holes?.length) {
     const wire = (c: Contour, ccw: boolean) => {
       const isCcw = polygonArea(contourPoints(c)) > 0;
       return (contourDrawing(isCcw === ccw ? c : reverseContour(c)).sketchOnPlane('XY') as unknown as { wire: Wire }).wire;
     };
-    return [facesUp(makeFace(wire(p.outer, true), p.holes.map((h) => wire(h, false))).wrapped)];
+    const face = facesUp(makeFace(wire(p.outer, true), p.holes.map((h) => wire(h, false))).wrapped);
+    if (Math.abs(offset) <= EPS) return [face];
+    // Drawing.offset gives up on pours (minutes, then a wasm crash).
+    const grown = offsetFace(face, offset);
+    return grown ? [grown] : [];
   }
   return primitiveDrawings(p, offset).map(drawingFace);
 }
