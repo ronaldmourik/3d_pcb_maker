@@ -18,7 +18,7 @@ export type Primitive =
   | { kind: 'stroke'; dark: boolean; from: Pt; seg: Seg; width: number }
   | { kind: 'circle'; dark: boolean; center: Pt; r: number }
   /** Arbitrary filled shape: rect/obround/polygon pads, macros, regions. */
-  | { kind: 'contour'; dark: boolean; outer: Contour; holes?: Contour[] };
+  | { kind: 'contour'; dark: boolean; outer: Contour; holes?: Contour[]; zone?: true };
 
 export type LayerRole = 'top-copper' | 'bottom-copper' | 'silk-top' | 'silk-bottom' | 'outline' | 'drill' | 'ignore';
 

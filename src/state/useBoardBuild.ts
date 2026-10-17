@@ -85,6 +85,9 @@ export function useBoardBuild() {
   const hasTop = layers.some((l) => l.role === 'top-copper' && l.primitives.length > 0);
   const hasBottom = layers.some((l) => l.role === 'bottom-copper' && l.primitives.length > 0);
   const hasOutline = layers.some((l) => l.role === 'outline');
+  const hasZones = layers.some(
+    (l) => (l.role === 'top-copper' || l.role === 'bottom-copper') && l.primitives.some((p) => p.kind === 'contour' && p.zone),
+  );
   const hasSilk = layers.some((l) => (l.role === 'silk-top' || l.role === 'silk-bottom') && l.primitives.length > 0);
   const dirty = !applied || !settingsEqual(draft, applied.settings) || applied.layersVersion !== layersVersion;
   const canApply = (hasTop || hasBottom) && engineReady;
@@ -231,6 +234,7 @@ export function useBoardBuild() {
     hasBottom,
     hasOutline,
     hasSilk,
+    hasZones,
     hasStamps,
     dirty,
     canApply,

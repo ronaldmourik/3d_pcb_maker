@@ -6,6 +6,7 @@ import { buildOutline } from '../src/gerber/outline';
 import { identifyRole, boardName } from '../src/gerber/loadFiles';
 import { evalMacroExpr } from '../src/gerber/macroExpr';
 import { contourPoints, polygonArea } from '../src/gerber/geom2d';
+import { pourGerber, twoZonesGerber } from './pourFixture';
 
 describe('layer identification', () => {
   it('detects KiCad roles', () => {
@@ -80,5 +81,21 @@ describe('outline', () => {
     expect(r.shapes).toHaveLength(1);
     const area = Math.abs(polygonArea(contourPoints(r.shapes[0].outer, Math.PI / 720)));
     expect(area).toBeCloseTo(1200 - 9 + (Math.PI * 9) / 4, 1);
+  });
+});
+
+describe('filled zone detection', () => {
+  const zones = (text: string) => parseGerber(text).primitives.filter((p) => p.kind === 'contour' && p.zone).length;
+  it('uses the X2 aperture function', () => {
+    expect(zones(fixture('ketel_opto_solid/ketel_opto-B_Cu.gbr'))).toBe(1);
+    expect(zones(twoZonesGerber())).toBe(2);
+  });
+  it('falls back to geometry without attributes', () => {
+    expect(zones(fixture('ketel_opto_solid/ketel_opto-B_Cu.gbr').replace(/%T[AOD][^%]*%/g, ''))).toBe(1);
+    expect(zones(pourGerber())).toBe(1);
+  });
+  it('does not mistake pads for zones', () => {
+    for (const f of ['demo-F_Cu.gbr', 'demo-B_Cu.gbr', 'ketel_opto_double/ketel_opto-B_Cu.gbr', 'ketel_opto_double/ketel_opto-F_Cu.gbr', 'ketel_opto_solid/ketel_opto-F_Cu.gbr'])
+      expect(zones(fixture(f)), f).toBe(0);
   });
 });

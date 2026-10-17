@@ -3,6 +3,8 @@ import type { Settings } from '../state/settings';
 
 interface Props {
   hasSilk: boolean;
+  /** A copper layer has filled zones (pours). */
+  hasZones: boolean;
   draft: Settings;
   onChange: (s: Settings) => void;
   hasTop: boolean;
@@ -17,7 +19,7 @@ interface Props {
 type NumKey = { [K in keyof Settings]: Settings[K] extends number ? K : never }[keyof Settings];
 type BoolKey = { [K in keyof Settings]: Settings[K] extends boolean ? K : never }[keyof Settings];
 
-export function SettingsPanel({ hasSilk, draft, onChange, hasTop, hasBottom, hasOutline, dirty, canApply, onApply, onReset }: Props) {
+export function SettingsPanel({ hasSilk, hasZones, draft, onChange, hasTop, hasBottom, hasOutline, dirty, canApply, onApply, onReset }: Props) {
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => onChange({ ...draft, [k]: v });
   const num = (k: NumKey, label: string, opts: { step?: number; min?: number; max?: number; unit?: string; hint?: string } = {}) => (
     <label className="field" title={opts.hint}>
@@ -51,6 +53,8 @@ export function SettingsPanel({ hasSilk, draft, onChange, hasTop, hasBottom, has
   const conductive = draft.mode === 'conductive';
   const groove = draft.mode === 'groove';
   const flat = recessed || groove;
+  const raised = draft.mode === 'raised';
+  const zonesOff = hasZones && draft.skipZones && (groove || raised);
 
   return (
     <div className="settings">
@@ -96,6 +100,19 @@ export function SettingsPanel({ hasSilk, draft, onChange, hasTop, hasBottom, has
             : '45° bevel on the top edges of the raised traces: a clean line to cut along, and the tape wraps without tearing. 0 = sharp edges.',
         })}
         {num('copperOffset', 'Copper grow / shrink', { step: 0.05, hint: 'Positive widens all traces and pads, negative narrows them.' })}
+        {hasZones &&
+          (groove || raised) &&
+          bool(
+            'skipZones',
+            'Leave filled zones as leftover copper',
+            'Filled zones and all copper connected to them (pads, traces) are not processed: the tape left over there becomes the zone. A groove along each zone outline separates it from other zones and copper.',
+          )}
+        {zonesOff && raised && (
+          <>
+            {num('grooveWidth', 'Zone separator width', { step: 0.05, min: 0.2, hint: 'Groove along each zone outline, measured outward from the zone edge: a guide to cut the tape.' })}
+            {num('grooveDepth', 'Zone separator depth', { step: 0.05, min: 0.1 })}
+          </>
+        )}
         <label className="field">
           <span>Sides</span>
           <select value={sides} disabled={!both} onChange={(e) => set('sides', e.target.value as Settings['sides'])}>
