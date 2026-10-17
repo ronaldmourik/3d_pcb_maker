@@ -7,6 +7,8 @@ Browser app that turns Gerber + Excellon exports (KiCad or any EDA tool) into 3D
 
 **Try it:** https://ronaldmourik.github.io/3d_pcb_maker/ — everything runs locally in your browser; your files are never uploaded.
 
+![PCB Maker with a double-sided KiCad board loaded: layer list and settings on the left, the two printable halves and alignment dowels in the 3D preview](docs/screenshot.png)
+
 ## How it works
 
 1. Export Gerbers and drill files from your PCB tool and drop them (or a zip) into the app.
@@ -26,6 +28,7 @@ Browser app that turns Gerber + Excellon exports (KiCad or any EDA tool) into 3D
 
 **Geometry**
 - Traces, pads, regions and copper pours (including KiCad's "fractured" zone fills) are merged into one copper shape. Drill holes and slots are cut through.
+- **Leave filled zones as leftover copper** (cut groove and raised modes): filled zones and all copper connected to them are left unprocessed, so the tape left over there becomes the zone. A separator groove along each zone outline keeps zones apart.
 - Optional exact 45° **edge chamfer**: on the rim of recessed channels, or on the top edges of raised traces.
 - **Double-sided** boards are generated as two halves (copper-side up, bottom half mirrored) with alignment dowels to glue them together.
 - Optional **press stamp**: ribs for recessed boards, or pockets with an optional cutting ridge for raised boards, or a tear ridge for cut groove boards, with alignment pins in the larger holes.
@@ -88,7 +91,7 @@ Notes:
 
 ## Contributing
 
-Issues and pull requests are welcome. Please run `npx tsc` and `npm test` before opening a pull request; geometry changes should come with a test (the existing tests check exact volumes, topology and real KiCad exports in `tests/fixtures/`).
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup and test conventions, and [SECURITY.md](SECURITY.md) for reporting vulnerabilities. This project follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 

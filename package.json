@@ -16,11 +16,16 @@
   "keywords": [
     "pcb",
     "gerber",
+    "excellon",
     "kicad",
     "3d-printing",
     "copper-tape",
+    "conductive-filament",
+    "stl",
+    "step",
+    "3mf",
     "opencascade",
-    "step"
+    "replicad"
   ],
   "type": "module",
   "scripts": {
