@@ -18,6 +18,11 @@ export interface Settings {
   /** Groove mode: stepped stamp ridge (half-width tip against the trace edge) instead of a square one. */
   grooveRidgeStepped: boolean;
   copperOffset: number;
+  /**
+   * Groove/raised mode: leave filled zones and all copper connected to them unprocessed, so the leftover tape
+   * becomes the zone. Each zone outline gets a separator groove (groove width/depth).
+   */
+  skipZones: boolean;
 
   holes: boolean;
   holeOffset: number;
@@ -84,6 +89,7 @@ export const defaultSettings: Settings = {
   grooveDepth: 0.6,
   grooveRidgeStepped: false,
   copperOffset: 0,
+  skipZones: false,
 
   holes: true,
   holeOffset: 0.1,
