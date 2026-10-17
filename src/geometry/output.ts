@@ -24,9 +24,11 @@ export interface PreviewOptions {
 }
 
 /** Category tag in preview body names (`category|name`), used by the viewer's visibility toggles. */
-export type PreviewCategory = 'board' | 'copper' | 'stamp' | 'dowel' | 'issue' | 'overlay';
+export type PreviewCategory = 'board' | 'copper' | 'silk' | 'stamp' | 'dowel' | 'issue' | 'overlay';
 
 export function bodyCategory(name: string, color: string): PreviewCategory {
+  // The silkscreen colour is user-chosen, so it is recognised by name.
+  if (name.toLowerCase().endsWith('silkscreen')) return 'silk';
   if (color === COLORS.copper || color === COLORS.conductive) return 'copper';
   if (color === COLORS.stamp) return 'stamp';
   if (color === COLORS.dowel) return 'dowel';

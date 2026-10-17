@@ -37,6 +37,7 @@ export function migrateSettings(raw: unknown): Settings {
     if (typeof v === 'number' && !Number.isFinite(v)) continue;
     const allowed = ENUMS[k];
     if (allowed && !allowed.includes(v as string)) continue;
+    if (k === 'silkColor' && !/^#[0-9a-f]{6}$/i.test(v as string)) continue;
     (out as unknown as Record<string, unknown>)[k] = v;
   }
   return out;
