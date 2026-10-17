@@ -11,6 +11,8 @@ export function placeDowels(
   socketRadius: number,
   margin: number,
   copper: Primitive[] = [],
+  /** Extra distance to keep from the copper (e.g. the groove around it). */
+  copperClearance = 0,
 ): Pt[] {
   const obstacles = copper.filter((c) => c.dark);
   const regions = shapes.map((s) => ({ outer: contourPoints(s.outer), holes: s.holes.map((h) => contourPoints(h)) }));
@@ -29,7 +31,7 @@ export function placeDowels(
       const dist = d.to ? distPointSegment(p, d.at, d.to) : Math.hypot(p[0] - d.at[0], p[1] - d.at[1]);
       if (dist < clearance + d.diameter / 2) return false;
     }
-    for (const c of obstacles) if (distToPrimitive(p, c) < clearance) return false;
+    for (const c of obstacles) if (distToPrimitive(p, c) < clearance + copperClearance) return false;
     return chosen.every((c) => Math.hypot(p[0] - c[0], p[1] - c[1]) >= 2 * socketRadius + margin * 2);
   };
 

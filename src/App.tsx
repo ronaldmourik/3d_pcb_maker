@@ -17,7 +17,7 @@ export default function App() {
   const ids = b.parts.map((p) => p.id);
   const available: PreviewCategory[] = [
     'board',
-    ...(b.draft.mode !== 'recessed' ? (['copper'] as const) : []),
+    ...(b.draft.mode !== 'recessed' && b.draft.mode !== 'groove' ? (['copper'] as const) : []),
     ...(ids.some((i) => i.startsWith('stamp')) ? (['stamp'] as const) : []),
     ...(ids.includes('dowels') ? (['dowel'] as const) : []),
     ...(problems.length ? (['issue'] as const) : []),

@@ -18,7 +18,7 @@ export interface Stored {
 }
 
 const ENUMS: Partial<Record<keyof Settings, readonly string[]>> = {
-  mode: ['raised', 'recessed', 'conductive'],
+  mode: ['raised', 'recessed', 'conductive', 'groove'],
   sides: ['top', 'bottom', 'both'],
   outlineSource: ['edge-cuts', 'bounding-box'],
   silkMode: ['off', 'engrave', 'emboss'],
@@ -46,6 +46,7 @@ export const BUILT_IN_PRESETS: Preset[] = [
   { name: '0.4 mm nozzle', builtIn: true, values: { nozzleDiameter: 0.4, minGap: 0.5, silkMinWidth: 0.4, conductiveMinWidth: 1.5 } },
   { name: '0.6 mm nozzle', builtIn: true, values: { nozzleDiameter: 0.6, minGap: 0.7, silkMinWidth: 0.6, conductiveMinWidth: 1.8 } },
   { name: 'Vinyl-cut tape', builtIn: true, values: { mode: 'raised', stampEnabled: false, channelChamfer: 0 } },
+  { name: 'Cut groove (copper tape)', builtIn: true, values: { mode: 'groove', stampEnabled: true, grooveWidth: 0.8, grooveDepth: 0.6, stampClearance: 0.1 } },
 ];
 
 export function load(storage: Pick<Storage, 'getItem'> | undefined = globalThis.localStorage): Stored {

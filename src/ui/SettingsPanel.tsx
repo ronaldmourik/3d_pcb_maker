@@ -49,25 +49,38 @@ export function SettingsPanel({ hasSilk, draft, onChange, hasTop, hasBottom, has
   const doubleSided = both && draft.sides === 'both';
   const recessed = draft.mode === 'recessed';
   const conductive = draft.mode === 'conductive';
+  const groove = draft.mode === 'groove';
+  const flat = recessed || groove;
 
   return (
     <div className="settings">
       <Section title="Copper traces">
         <div className="segmented">
-          {(['recessed', 'raised', 'conductive'] as const).map((m) => (
+          {(['recessed', 'raised', 'groove', 'conductive'] as const).map((m) => (
             <button key={m} className={draft.mode === m ? 'active' : ''} onClick={() => set('mode', m)}>
-              {m === 'recessed' ? 'Recessed (sand off)' : m === 'raised' ? 'Raised (cut out)' : 'Conductive filament'}
+              {m === 'recessed' ? 'Recessed (sand off)' : m === 'raised' ? 'Raised (cut out)' : m === 'groove' ? 'Cut groove (stamp)' : 'Conductive filament'}
             </button>
           ))}
         </div>
         <p className="hint">
           {recessed
             ? 'Traces are channels. Lay the tape over them, press it in, then sand the top surface.'
-            : conductive
+            : groove
+              ? 'Flat board with a groove around each trace. Stick the tape over it and press the stamp: its ridge pushes the tape into the groove and tears it at the trace edge. Peel off the rest.'
+              : conductive
               ? 'Traces are printed in conductive filament as a second material. No tape needed.'
               : 'Traces stand proud. Lay the tape over them and cut it along the trace edges.'}
         </p>
-        {recessed ? num('traceDepth', 'Channel depth', { min: 0.05 }) : num('traceHeight', conductive ? 'Trace thickness' : 'Trace height', { min: 0.05 })}
+        {groove ? (
+          <>
+            {num('grooveWidth', 'Groove width', { step: 0.05, min: 0.2, hint: 'Measured outward from the trace edge. The stamp ridge is this minus twice the clearance.' })}
+            {num('grooveDepth', 'Groove depth', { step: 0.05, min: 0.1, hint: 'Deep enough for the pressed tape to tear at the trace edge.' })}
+          </>
+        ) : recessed ? (
+          num('traceDepth', 'Channel depth', { min: 0.05 })
+        ) : (
+          num('traceHeight', conductive ? 'Trace thickness' : 'Trace height', { min: 0.05 })
+        )}
         {conductive && (
           <>
             {bool('conductiveEmbed', 'Embed flush in the board', 'On: traces fill pockets (one two-material print). Off: traces stand on top.')}
@@ -75,7 +88,7 @@ export function SettingsPanel({ hasSilk, draft, onChange, hasTop, hasBottom, has
             {num('conductiveMinWidth', 'Min trace width', { step: 0.1, min: 0.2, hint: 'Narrower traces are reported by the printability check.' })}
           </>
         )}
-        {!(conductive && draft.conductiveEmbed) && num('channelChamfer', 'Edge chamfer', {
+        {!(conductive && draft.conductiveEmbed) && !groove && num('channelChamfer', 'Edge chamfer', {
           step: 0.05,
           min: 0,
           hint: recessed
@@ -137,8 +150,8 @@ export function SettingsPanel({ hasSilk, draft, onChange, hasTop, hasBottom, has
             <select value={draft.silkMode} onChange={(e) => set('silkMode', e.target.value as Settings['silkMode'])}>
               <option value="off">Off</option>
               <option value="engrave">Engraved</option>
-              <option value="emboss" disabled={recessed}>
-                Embossed{recessed ? ' (raised mode only)' : ''}
+              <option value="emboss" disabled={flat}>
+                Embossed{flat ? ' (raised mode only)' : ''}
               </option>
             </select>
           </label>
@@ -153,15 +166,18 @@ export function SettingsPanel({ hasSilk, draft, onChange, hasTop, hasBottom, has
       )}
 
       {!conductive && <Section title="Press stamp">
-        {bool('stampEnabled', recessed ? 'Rib stamp (presses tape into channels)' : 'Pocket stamp (shears tape at trace edges)')}
+        {bool(
+          'stampEnabled',
+          recessed ? 'Rib stamp (presses tape into channels)' : groove ? 'Ridge stamp (tears tape into the grooves)' : 'Pocket stamp (shears tape at trace edges)',
+        )}
         {draft.stampEnabled && (
           <>
             {num('stampThickness', 'Plate thickness', { min: 0.8 })}
             {num('stampClearance', 'Clearance per side', { step: 0.02, min: 0 })}
             {num('tapeThickness', 'Copper tape thickness', { step: 0.01, min: 0 })}
-            {num('stampFeatureOverride', recessed ? 'Rib height (0 = auto)' : 'Pocket depth (0 = auto)', { step: 0.05, min: 0 })}
-            {!recessed && bool('cuttingRidge', 'Cutting ridge around pockets')}
-            {!recessed && draft.cuttingRidge && (
+            {num('stampFeatureOverride', recessed ? 'Rib height (0 = auto)' : groove ? 'Ridge height (0 = groove depth)' : 'Pocket depth (0 = auto)', { step: 0.05, min: 0 })}
+            {!flat && bool('cuttingRidge', 'Cutting ridge around pockets')}
+            {!flat && draft.cuttingRidge && (
               <>
                 {num('ridgeWidth', 'Ridge width', { step: 0.05, min: 0.1 })}
                 {num('ridgeHeight', 'Ridge height', { step: 0.05, min: 0.1 })}
