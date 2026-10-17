@@ -311,10 +311,14 @@ export function buildModel(
       warn(`The ${side} copper layer is empty after clipping to the outline.`);
     }
     const silk = silkFace(side);
+    let silkBody: Shape3D | null = null;
     if (silk) {
       const depth = Math.min(s.silkDepth, thickness - socketDepth - 0.3);
-      if (s.silkMode === 'emboss' && s.mode !== 'recessed' && s.mode !== 'groove') board = board.fuse(as3D(prism(silk, thickness, s.silkDepth)));
-      else if (depth > 0.05) {
+      if (s.silkMode === 'emboss' && s.mode !== 'recessed' && s.mode !== 'groove') {
+        const marks = as3D(prism(silk, thickness, s.silkDepth));
+        if (s.silkSeparate) silkBody = marks;
+        else board = board.fuse(marks);
+      } else if (depth > 0.05) {
         if (s.silkMode === 'emboss')
           warn(
             s.mode === 'groove'
@@ -322,28 +326,33 @@ export function buildModel(
               : 'Embossed silkscreen would be sanded off in recessed mode; it is engraved instead.',
           );
         board = board.cut(as3D(prism(silk, thickness - depth, depth + 1)));
+        // Separate filament: the marks fill the engraving flush (an inlay).
+        if (s.silkSeparate) silkBody = as3D(prism(silk, thickness - depth, depth));
       }
     }
     if (socketsFace) board = board.cut(as3D(prism(socketsFace, -1, socketDepth + 1)));
     if (holesSolid) {
       board = board.cut(as3D(holesSolid));
       if (copper) copper = copper.cut(as3D(holesSolid));
+      if (silkBody) silkBody = silkBody.cut(as3D(holesSolid));
     }
-    return { board, copper };
+    return { board, copper, silk: silkBody };
   };
   const slab = (thickness: number, side: 'top' | 'bottom', socketsFace: TopoShape | null, socketDepth: number, socketsKey = '') => {
     const featureH = s.mode === 'recessed' ? s.traceDepth : s.mode === 'groove' ? key(s.grooveWidth, s.grooveDepth) : s.traceHeight;
     const chamfer = s.mode === 'groove' ? 0 : s.channelChamfer;
-    const silkKey = key(s.silkMode, s.silkDepth, s.silkMinWidth, s.silkClearance);
+    const silkKey = key(s.silkMode, s.silkDepth, s.silkMinWidth, s.silkClearance, s.silkSeparate);
     const k = key(outlineKey, holesKey, 'slab', thickness, side, s.mode, featureH, chamfer, s.copperOffset, socketsKey, socketDepth, silkKey, s.mode === 'conductive' ? s.conductiveEmbed : '');
     const r = staged(k, (warn, report) => buildSlab(thickness, side, socketsFace, socketDepth, warn, report));
-    return { board: r.board.clone(), copper: r.copper ? r.copper.clone() : null };
+    return { board: r.board.clone(), copper: r.copper ? r.copper.clone() : null, silk: r.silk ? r.silk.clone() : null };
   };
 
   const conductive = s.mode === 'conductive';
   if (conductive && s.mergeBodies) warnings.push('Conductive traces are kept as a separate body (a second material), even with "merge bodies" on.');
-  const bodiesOf = (r: { board: Shape3D; copper: Shape3D | null }, label: string): Body[] => {
-    if (r.copper && s.mergeBodies && !conductive) return [{ name: label, shape: r.board.fuse(r.copper), color: COLORS.board, material: 'Board' }];
+  const bodiesOf = (r: { board: Shape3D; copper: Shape3D | null; silk: Shape3D | null }, label: string): Body[] => {
+    // Separate silkscreen stays its own body (a second filament), even with "merge bodies" on.
+    const silk: Body[] = r.silk ? [{ name: `${label} silkscreen`, shape: r.silk, color: s.silkColor, material: 'Silkscreen' }] : [];
+    if (r.copper && s.mergeBodies && !conductive) return [{ name: label, shape: r.board.fuse(r.copper), color: COLORS.board, material: 'Board' }, ...silk];
     const out: Body[] = [{ name: `${label} base`, shape: r.board, color: COLORS.board, material: 'Board' }];
     if (r.copper)
       out.push(
@@ -351,7 +360,7 @@ export function buildModel(
           ? { name: `${label} traces`, shape: r.copper, color: COLORS.conductive, material: 'Conductive' }
           : { name: `${label} copper`, shape: r.copper, color: COLORS.copper, material: 'Copper' },
       );
-    return out;
+    return [...out, ...silk];
   };
   const mirrorBodies = (bodies: Body[]) => bodies.map((b) => ({ ...b, shape: mirrorX(b.shape) }));
 

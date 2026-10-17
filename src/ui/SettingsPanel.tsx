@@ -160,6 +160,19 @@ export function SettingsPanel({ hasSilk, draft, onChange, hasTop, hasBottom, has
               {num('silkDepth', draft.silkMode === 'emboss' ? 'Height' : 'Depth', { step: 0.05, min: 0.1 })}
               {num('silkMinWidth', 'Min line width', { step: 0.05, min: 0.1, hint: 'Thinner silkscreen lines (text) are widened to this.' })}
               {num('silkClearance', 'Clearance to copper', { step: 0.05, min: 0 })}
+              {bool(
+                'silkSeparate',
+                'Separate filament',
+                draft.silkMode === 'emboss' && !flat
+                  ? 'Print the marks as their own body on the board, in a second filament (multi-material 3MF).'
+                  : 'Fill the engraving flush with a second filament (multi-material 3MF).',
+              )}
+              {draft.silkSeparate && (
+                <label className="field" title="Preview colour, also written to the 3MF material.">
+                  <span>Filament colour</span>
+                  <input type="color" value={draft.silkColor} onChange={(e) => set('silkColor', e.target.value)} />
+                </label>
+              )}
             </>
           )}
         </Section>

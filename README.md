@@ -29,12 +29,12 @@ Browser app that turns Gerber + Excellon exports (KiCad or any EDA tool) into 3D
 - Optional exact 45° **edge chamfer**: on the rim of recessed channels, or on the top edges of raised traces.
 - **Double-sided** boards are generated as two halves (copper-side up, bottom half mirrored) with alignment dowels to glue them together.
 - Optional **press stamp**: ribs for recessed boards, or pockets with an optional cutting ridge for raised boards, or a tear ridge for cut groove boards, with alignment pins in the larger holes.
-- **Silkscreen** layers are engraved into the copper face, or embossed on it in raised mode. Thin text lines are widened to a printable width.
+- **Silkscreen** layers are engraved into the copper face, or embossed on it in raised mode. Thin text lines are widened to a printable width. With **Separate filament** the marks become their own body in a colour you pick (a flush inlay in the engraving, or a layer on top when embossed), so you can print them in a different filament.
 
 **Checks and exports**
 - **Printability check**: reports traces and pads narrower than 2× the nozzle, too-small gaps between copper, holes that are too small and thin channel floors. Each issue is clickable and shows a red marker in the preview.
 - The geometry is a true B-rep built with OpenCascade (replicad). The preview is the generated STEP shown in Online3DViewer.
-- Downloads: STEP, STL or 3MF. 3MF exports use named materials (Board, Copper, Conductive) for multi-material printing.
+- Downloads: STEP, STL or 3MF. 3MF exports use named materials (Board, Copper, Conductive, Silkscreen) for multi-material printing.
 - **Copper cut patterns** export as SVG or DXF (1:1, true arcs) for vinyl cutters.
 
 **Working with the app**

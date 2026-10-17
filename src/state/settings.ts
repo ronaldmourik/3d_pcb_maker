@@ -60,6 +60,10 @@ export interface Settings {
   silkDepth: number;
   silkClearance: number;
   silkMinWidth: number;
+  /** Print the marks as their own body in a second filament (multi-material 3MF). */
+  silkSeparate: boolean;
+  /** Colour of that filament (preview and 3MF material). */
+  silkColor: string;
 
   /** Printability check against the printer nozzle. */
   printCheck: boolean;
@@ -117,6 +121,8 @@ export const defaultSettings: Settings = {
   silkDepth: 0.3,
   silkClearance: 0.3,
   silkMinWidth: 0.4,
+  silkSeparate: false,
+  silkColor: '#1a1a1a',
 
   printCheck: true,
   nozzleDiameter: 0.4,

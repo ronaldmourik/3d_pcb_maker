@@ -18,6 +18,7 @@ export default function App() {
   const available: PreviewCategory[] = [
     'board',
     ...(b.draft.mode !== 'recessed' && b.draft.mode !== 'groove' ? (['copper'] as const) : []),
+    ...(b.hasSilk && b.draft.silkMode !== 'off' && b.draft.silkSeparate ? (['silk'] as const) : []),
     ...(ids.some((i) => i.startsWith('stamp')) ? (['stamp'] as const) : []),
     ...(ids.includes('dowels') ? (['dowel'] as const) : []),
     ...(problems.length ? (['issue'] as const) : []),
