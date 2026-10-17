@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Try the app
+    url: https://ronaldmourik.github.io/3d_pcb_maker/
+    about: The latest version runs in your browser.
+  - name: Report a security vulnerability
+    url: https://github.com/ronaldmourik/3d_pcb_maker/security/advisories/new
+    about: Please report security issues privately, not as a public issue.

@@ -2,3 +2,4 @@ node_modules
 dist
 public/occt
 scratch
+.claude/settings.local.json

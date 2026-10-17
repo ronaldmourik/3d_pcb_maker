@@ -1,0 +1,62 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; width: 1280px; height: 640px; overflow: hidden; }
+  body {
+    background: #2f6f4f;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    color: #fff;
+    display: flex; align-items: center;
+    position: relative;
+  }
+  .traces { position: absolute; inset: 0; }
+  .card {
+    position: relative;
+    margin-left: 96px;
+    display: flex; align-items: center; gap: 56px;
+  }
+  .card svg.icon { width: 260px; height: 260px; flex: none; filter: drop-shadow(0 12px 24px rgba(0,0,0,.25)); }
+  h1 { margin: 0 0 16px; font-size: 92px; font-weight: 700; letter-spacing: -1px; }
+  p { margin: 0; font-size: 34px; line-height: 1.35; color: #d9eadf; max-width: 760px; }
+  .tags { margin-top: 28px; display: flex; gap: 14px; }
+  .tags span { font-size: 24px; padding: 6px 18px; border-radius: 999px; background: rgba(232,161,92,.18); color: #f3c592; border: 2px solid rgba(232,161,92,.5); }
+</style>
+</head>
+<body>
+  <svg class="traces" viewBox="0 0 1280 640" fill="none" stroke="#3f8a63" stroke-width="14" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M1280 90 H1120 L1060 150 V260"/>
+    <path d="M1280 560 H1180 L1120 500 V420"/>
+    <path d="M0 600 H260 L300 560"/>
+    <path d="M0 40 H180"/>
+    <g fill="#3f8a63" stroke="none">
+      <circle cx="1060" cy="270" r="22"/><circle cx="1120" cy="410" r="22"/>
+      <circle cx="310" cy="550" r="20"/><circle cx="190" cy="40" r="20"/>
+    </g>
+  </svg>
+  <div class="card">
+    <svg class="icon" viewBox="0 0 512 512">
+      <rect width="512" height="512" rx="96" fill="#24573e"/>
+      <rect x="64" y="64" width="384" height="384" rx="40" fill="#3f8a63"/>
+      <g fill="none" stroke="#e8a15c" stroke-width="34" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M150 150 H300 L362 212 V362"/>
+        <path d="M150 362 V262 H246"/>
+      </g>
+      <g fill="#e8a15c">
+        <circle cx="150" cy="150" r="40"/><circle cx="362" cy="362" r="40"/>
+        <circle cx="150" cy="362" r="40"/><circle cx="246" cy="262" r="34"/>
+      </g>
+      <g fill="#24573e">
+        <circle cx="150" cy="150" r="14"/><circle cx="362" cy="362" r="14"/>
+        <circle cx="150" cy="362" r="14"/><circle cx="246" cy="262" r="12"/>
+      </g>
+    </svg>
+    <div>
+      <h1>PCB Maker</h1>
+      <p>Turn Gerber + Excellon exports into 3D-printable circuit boards for copper tape or conductive filament.</p>
+      <div class="tags"><span>STEP</span><span>STL</span><span>3MF</span><span>runs in your browser</span></div>
+    </div>
+  </div>
+</body>
+</html>

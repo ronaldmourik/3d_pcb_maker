@@ -1,0 +1,54 @@
+name: Bug report
+description: Something is wrong with a generated board, the preview or the app
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting! Attaching the Gerber and drill files that trigger the problem is the fastest way to get it fixed.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Load the attached files
+        2. Pick Recessed, 0.4 mm channel depth
+        3. Click Apply
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Trace mode
+      options:
+        - Recessed
+        - Raised
+        - Cut groove
+        - Conductive filament
+        - Not relevant
+  - type: textarea
+    id: files
+    attributes:
+      label: Gerber / drill files
+      description: Drag a zip of the files in here if you can share them. Mention any non-default settings.
+  - type: input
+    id: eda
+    attributes:
+      label: EDA tool and version
+      placeholder: KiCad 9.0
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and OS
+      placeholder: Chrome 140 on Windows 11
+    validations:
+      required: true
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: The preview, the printability report or a photo of the print.

@@ -7,6 +7,8 @@ Browser app that turns Gerber + Excellon exports (KiCad or any EDA tool) into 3D
 
 **Try it:** https://ronaldmourik.github.io/3d_pcb_maker/ — everything runs locally in your browser; your files are never uploaded.
 
+![PCB Maker with a double-sided KiCad board loaded: layer list and settings on the left, the two printable halves and alignment dowels in the 3D preview](docs/screenshot.png)
+
 ## How it works
 
 1. Export Gerbers and drill files from your PCB tool and drop them (or a zip) into the app.
@@ -88,7 +90,7 @@ Notes:
 
 ## Contributing
 
-Issues and pull requests are welcome. Please run `npx tsc` and `npm test` before opening a pull request; geometry changes should come with a test (the existing tests check exact volumes, topology and real KiCad exports in `tests/fixtures/`).
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup and test conventions, and [SECURITY.md](SECURITY.md) for reporting vulnerabilities. This project follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
