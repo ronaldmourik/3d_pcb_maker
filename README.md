@@ -28,6 +28,7 @@ Browser app that turns Gerber + Excellon exports (KiCad or any EDA tool) into 3D
 
 **Geometry**
 - Traces, pads, regions and copper pours (including KiCad's "fractured" zone fills) are merged into one copper shape. Drill holes and slots are cut through.
+- **Leave filled zones as leftover copper** (cut groove and raised modes): filled zones and all copper connected to them are left unprocessed, so the tape left over there becomes the zone. A separator groove along each zone outline keeps zones apart.
 - Optional exact 45° **edge chamfer**: on the rim of recessed channels, or on the top edges of raised traces.
 - **Double-sided** boards are generated as two halves (copper-side up, bottom half mirrored) with alignment dowels to glue them together.
 - Optional **press stamp**: ribs for recessed boards, or pockets with an optional cutting ridge for raised boards, or a tear ridge for cut groove boards, with alignment pins in the larger holes.
