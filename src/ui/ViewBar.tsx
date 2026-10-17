@@ -14,6 +14,7 @@ interface Props {
 const LABELS: Record<PreviewCategory, string> = {
   board: 'Board',
   copper: 'Copper',
+  silk: 'Silkscreen',
   stamp: 'Stamps',
   dowel: 'Dowels',
   issue: 'Markers',

@@ -338,6 +338,42 @@ describe('silkscreen marks', () => {
     const off = boardVol(0.5, 3, { silkMode: 'off' });
     expect(boardVol(0.5, 3, { silkMode: 'emboss' }) - off).toBeCloseTo((10 * 0.5 + Math.PI * 0.25 ** 2) * 0.3, 4);
   });
+
+  describe('in a separate filament', () => {
+    const marks = (10 * 0.5 + Math.PI * 0.25 ** 2) * 0.3;
+    const sep = (over: Partial<Settings>) =>
+      buildModel(input(0.5, 3), { ...defaultSettings, sides: 'top', mode: 'raised', margin: 3, holes: false, silkSeparate: true, silkColor: '#ffffff', ...over });
+    const silkBody = (r: BuildResult) => r.parts[0].bodies.find((b) => b.material === 'Silkscreen');
+
+    it('fills the engraving flush', () => {
+      const r = sep({});
+      const silk = silkBody(r)!;
+      expect(silk.name).toBe('Board silkscreen');
+      expect(silk.color).toBe('#ffffff');
+      expect(isValid(silk.shape.wrapped)).toBe(true);
+      expect(measureVolume(silk.shape)).toBeCloseTo(marks, 4);
+      expect(silk.shape.boundingBox.bounds[1][2]).toBeCloseTo(defaultSettings.boardThickness, 5);
+      // The board itself is still engraved.
+      expect(boardVol(0.5, 3, { silkMode: 'off' }) - measureVolume(r.parts[0].bodies[0].shape)).toBeCloseTo(marks, 4);
+    });
+
+    it('stands on the board when embossed, without fusing into it', () => {
+      const r = sep({ silkMode: 'emboss' });
+      expect(measureVolume(silkBody(r)!.shape)).toBeCloseTo(marks, 4);
+      expect(measureVolume(r.parts[0].bodies[0].shape)).toBeCloseTo(boardVol(0.5, 3, { silkMode: 'off' }), 4);
+    });
+
+    it('stays separate with merged bodies and in recessed mode', () => {
+      expect(sep({ mergeBodies: true }).parts[0].bodies.map((b) => b.material)).toEqual(['Board', 'Silkscreen']);
+      expect(silkBody(sep({ mode: 'recessed' }))).toBeDefined();
+    });
+
+    it('is a named material in the 3MF', async () => {
+      const r = sep({});
+      const model = strFromU8(unzipSync((await exportParts(r, 'board', '3mf', 0.01, 0.1)).data)['3D/3dmodel.model']);
+      expect(model).toContain('<base name="Silkscreen" displaycolor="#FFFFFFFF"/>');
+    });
+  });
 });
 
 describe('copper cut patterns (SVG / DXF)', () => {
