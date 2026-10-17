@@ -263,6 +263,17 @@ export function buildModel(
   };
 
   // ---- board / halves ----
+  /** The ring between two outward copper offsets, clipped to the outline (null when empty). */
+  const band = (side: 'top' | 'bottom', inner: number, outer: number): TopoShape | null => {
+    if (outer <= inner) return null;
+    const wide = copperFace(side, outer);
+    if (!wide) return null;
+    const narrow = copperFace(side, inner);
+    const r = unify(common(narrow ? cutAll(wide, [narrow]) : wide, outlineFace));
+    return isNullOrEmpty(r) ? null : r;
+  };
+  /** Groove depth, limited to leave a 0.2 mm floor. */
+  const grooveDepth = (thickness: number) => (s.grooveDepth > thickness - 0.2 ? Math.max(0.1, thickness - 0.2) : s.grooveDepth);
   const buildSlab = (thickness: number, side: 'top' | 'bottom', socketsFace: TopoShape | null, socketDepth: number, warn: Warn, report: Report) => {
     let board = as3D(prism(outlineFace, 0, thickness));
     let copper: Shape3D | null = null;
@@ -276,6 +287,13 @@ export function buildModel(
         }
         board = board.cut(as3D(prism(cf, thickness - d, d + 1)));
         if (s.channelChamfer > 0) board = chamferChannels(board, side, thickness, d, warn, report);
+      } else if (s.mode === 'groove') {
+        // Flush traces with a tear groove around them: the stamp ridge presses copper tape into it.
+        const d = grooveDepth(thickness);
+        if (d < s.grooveDepth) warn(`Groove depth reduced to ${d.toFixed(2)} mm to leave a floor under the grooves.`);
+        const ring = band(side, s.copperOffset, s.copperOffset + s.grooveWidth);
+        if (ring) board = board.cut(as3D(prism(ring, thickness - d, d + 1)));
+        else warn(`The ${side} groove is empty (groove width must be > 0).`);
       } else if (s.mode === 'conductive' && s.conductiveEmbed) {
         // Flush: the conductive traces fill pockets in the board (one print, two materials).
         let h = s.traceHeight;
@@ -296,12 +314,17 @@ export function buildModel(
     let silkBody: Shape3D | null = null;
     if (silk) {
       const depth = Math.min(s.silkDepth, thickness - socketDepth - 0.3);
-      if (s.silkMode === 'emboss' && s.mode !== 'recessed') {
+      if (s.silkMode === 'emboss' && s.mode !== 'recessed' && s.mode !== 'groove') {
         const marks = as3D(prism(silk, thickness, s.silkDepth));
         if (s.silkSeparate) silkBody = marks;
         else board = board.fuse(marks);
       } else if (depth > 0.05) {
-        if (s.silkMode === 'emboss') warn('Embossed silkscreen would be sanded off in recessed mode; it is engraved instead.');
+        if (s.silkMode === 'emboss')
+          warn(
+            s.mode === 'groove'
+              ? 'Embossed silkscreen would lift the copper tape in cut groove mode; it is engraved instead.'
+              : 'Embossed silkscreen would be sanded off in recessed mode; it is engraved instead.',
+          );
         board = board.cut(as3D(prism(silk, thickness - depth, depth + 1)));
         // Separate filament: the marks fill the engraving flush (an inlay).
         if (s.silkSeparate) silkBody = as3D(prism(silk, thickness - depth, depth));
@@ -316,8 +339,8 @@ export function buildModel(
     return { board, copper, silk: silkBody };
   };
   const slab = (thickness: number, side: 'top' | 'bottom', socketsFace: TopoShape | null, socketDepth: number, socketsKey = '') => {
-    const featureH = s.mode === 'recessed' ? s.traceDepth : s.traceHeight;
-    const chamfer = s.channelChamfer;
+    const featureH = s.mode === 'recessed' ? s.traceDepth : s.mode === 'groove' ? key(s.grooveWidth, s.grooveDepth) : s.traceHeight;
+    const chamfer = s.mode === 'groove' ? 0 : s.channelChamfer;
     const silkKey = key(s.silkMode, s.silkDepth, s.silkMinWidth, s.silkClearance, s.silkSeparate);
     const k = key(outlineKey, holesKey, 'slab', thickness, side, s.mode, featureH, chamfer, s.copperOffset, socketsKey, socketDepth, silkKey, s.mode === 'conductive' ? s.conductiveEmbed : '');
     const r = staged(k, (warn, report) => buildSlab(thickness, side, socketsFace, socketDepth, warn, report));
@@ -362,9 +385,11 @@ export function buildModel(
       if (depth < s.dowelDepth) warnings.push(`Dowel socket depth limited to ${depth.toFixed(2)} mm by the half thickness.`);
       if (depth >= 0.3) {
         const socketR = (s.dowelDiameter + s.dowelClearance) / 2;
-        const avoid = s.mode === 'recessed' && s.traceDepth + depth > half - 0.2;
-        dowelPositions = cache.get(key(outlineKey, 'dowels', s.dowelCount, socketR, s.dowelEdgeMargin, avoid), () =>
-          placeDowels(shapes, bounds, input.drills, s.dowelCount, socketR, s.dowelEdgeMargin, avoid ? [...(input.top ?? []), ...(input.bottom ?? [])] : []),
+        const featureDepth = s.mode === 'recessed' ? s.traceDepth : s.mode === 'groove' ? s.grooveDepth : 0;
+        const avoid = featureDepth > 0 && featureDepth + depth > half - 0.2;
+        const avoidGap = avoid && s.mode === 'groove' ? Math.max(0, s.copperOffset + s.grooveWidth) : 0;
+        dowelPositions = cache.get(key(outlineKey, 'dowels', s.dowelCount, socketR, s.dowelEdgeMargin, avoid, avoidGap), () =>
+          placeDowels(shapes, bounds, input.drills, s.dowelCount, socketR, s.dowelEdgeMargin, avoid ? [...(input.top ?? []), ...(input.bottom ?? [])] : [], avoidGap),
         );
         if (dowelPositions.length < s.dowelCount) warnings.push(`Only ${dowelPositions.length} of ${s.dowelCount} dowel positions fit on the board.`);
         socketsKey = key('sockets', socketR, JSON.stringify(dowelPositions));
@@ -414,10 +439,12 @@ export function buildModel(
       staged(key(holesKey, 'drc-holes', n), (_warn, report) => {
         for (const h of smallHoles(input.drills, s.holeOffset, s.minHoleDiameter, n)) report({ ...h, side: copperSides[0] });
       });
-    if (s.mode === 'recessed') {
-      const floor = (doubleSided ? T / 2 : T) - s.traceDepth;
-      if (floor < 0.3 + 1e-9) warnings.push(`Only ${floor.toFixed(2)} mm of material under the channels; use at least 0.3 mm.`);
+    if (s.mode === 'recessed' || s.mode === 'groove') {
+      const floor = (doubleSided ? T / 2 : T) - (s.mode === 'groove' ? s.grooveDepth : s.traceDepth);
+      if (floor < 0.3 + 1e-9) warnings.push(`Only ${floor.toFixed(2)} mm of material under the ${s.mode === 'groove' ? 'grooves' : 'channels'}; use at least 0.3 mm.`);
     }
+    if (s.mode === 'groove' && s.stampEnabled && s.grooveWidth - 2 * s.stampClearance < n)
+      warnings.push(`The stamp ridge (${(s.grooveWidth - 2 * s.stampClearance).toFixed(2)} mm) is narrower than the nozzle; widen the groove.`);
   }
 
   // ---- 2D cut patterns (vinyl cutter) ----
@@ -476,11 +503,12 @@ export function buildModel(
   }
 
   // ---- press stamps ----
+  if (s.mode === 'groove' && !s.stampEnabled) warnings.push('Cut groove mode is meant for the press stamp; enable it to tear the tape along the grooves.');
   if (s.stampEnabled && !conductive) {
     const stampSides: ('top' | 'bottom')[] = doubleSided ? ['top', 'bottom'] : [sides as 'top' | 'bottom'];
     for (const side of stampSides) {
       const stampKey = key(outlineKey, holesKey, 'stamp', side, s.mode, s.copperOffset, s.traceDepth, s.traceHeight, s.stampThickness, s.stampClearance,
-        s.tapeThickness, s.stampFeatureOverride, s.alignmentPins, s.pinMinHoleDiameter, s.pinClearance, s.pinLength, s.cuttingRidge, s.ridgeWidth, s.ridgeHeight);
+        s.tapeThickness, s.stampFeatureOverride, s.alignmentPins, s.pinMinHoleDiameter, s.pinClearance, s.pinLength, s.cuttingRidge, s.ridgeWidth, s.ridgeHeight, s.grooveWidth, s.grooveDepth, s.grooveRidgeStepped, s.boardThickness, doubleSided);
       const stamp = staged(stampKey, (warn) => {
         log(`Building ${side} stamp`);
         return buildStamp(side, warn);
@@ -507,6 +535,30 @@ export function buildModel(
       else warn(`The ${side} stamp has no ribs (copper too thin for the clearance).`);
       pinBase = ts;
       pinTop = ts + s.pinLength;
+    } else if (s.mode === 'groove') {
+      // Ridge into the groove: square, or stepped with its narrow tip against the trace edge where the tape should tear.
+      const d = grooveDepth(doubleSided ? s.boardThickness / 2 : s.boardThickness);
+      const rh = s.stampFeatureOverride > 0 ? s.stampFeatureOverride : d;
+      const inner = s.copperOffset + s.stampClearance;
+      const w = s.grooveWidth - 2 * s.stampClearance;
+      stamp = as3D(prism(outlineFace, 0, ts));
+      let ridge = 0;
+      if (w > 0) {
+        const base = band(side, inner, inner + w);
+        if (s.grooveRidgeStepped) {
+          const tip = band(side, inner, inner + w / 2);
+          if (base) stamp = stamp.fuse(as3D(prism(base, ts, rh / 2)));
+          if (tip) stamp = stamp.fuse(as3D(prism(tip, ts + rh / 2, rh / 2)));
+        } else if (base) {
+          stamp = stamp.fuse(as3D(prism(base, ts, rh)));
+        }
+        if (base) ridge = rh;
+        else warn(`The ${side} stamp has no ridge (copper layer empty).`);
+      } else {
+        warn(`The ${side} stamp has no ridge: the groove (${s.grooveWidth} mm) is not wider than twice the stamp clearance.`);
+      }
+      pinBase = ts;
+      pinTop = ts + ridge + s.pinLength;
     } else {
       const depth = s.stampFeatureOverride > 0 ? s.stampFeatureOverride : s.traceHeight;
       if (ts < depth + 0.6) {

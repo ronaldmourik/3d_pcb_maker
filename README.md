@@ -18,13 +18,17 @@ Browser app that turns Gerber + Excellon exports (KiCad or any EDA tool) into 3D
 **Trace modes**
 - **Recessed**: channels you press copper tape into and sand flush.
 - **Raised**: traces stand proud and you cut the tape along them.
+- **Cut groove**: the board is flat, with a groove around every trace (default 0.8 mm wide and 0.6 mm deep, measured outward from the trace edge). To use it:
+  1. Stick copper tape over the board.
+  2. Press the stamp on. Its ridge (groove width minus the clearance on each side) pushes the tape into the groove and tears it at the trace edge. The ridge is square by default; optionally it is stepped, with a half-width tip against the trace edge.
+  3. Peel off the waste.
 - **Conductive filament**: traces are a second material, embedded flush or on top. Each net gets a resistance estimate.
 
 **Geometry**
 - Traces, pads, regions and copper pours (including KiCad's "fractured" zone fills) are merged into one copper shape. Drill holes and slots are cut through.
 - Optional exact 45° **edge chamfer**: on the rim of recessed channels, or on the top edges of raised traces.
 - **Double-sided** boards are generated as two halves (copper-side up, bottom half mirrored) with alignment dowels to glue them together.
-- Optional **press stamp**: ribs for recessed boards, or pockets with an optional cutting ridge for raised boards, with alignment pins in the larger holes.
+- Optional **press stamp**: ribs for recessed boards, or pockets with an optional cutting ridge for raised boards, or a tear ridge for cut groove boards, with alignment pins in the larger holes.
 - **Silkscreen** layers are engraved into the copper face, or embossed on it in raised mode. Thin text lines are widened to a printable width. With **Separate filament** the marks become their own body in a colour you pick (a flush inlay in the engraving, or a layer on top when embossed), so you can print them in a different filament.
 
 **Checks and exports**
