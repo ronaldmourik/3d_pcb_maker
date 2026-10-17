@@ -1,6 +1,6 @@
 // Generation parameters. The UI edits a draft copy; only applied settings drive a build.
 
-export type Mode = 'raised' | 'recessed' | 'conductive';
+export type Mode = 'raised' | 'recessed' | 'conductive' | 'groove';
 export type Sides = 'top' | 'bottom' | 'both';
 
 export interface Settings {
@@ -11,6 +11,12 @@ export interface Settings {
   traceDepth: number;
   /** Chamfer on the top rim of recessed channels; 0 = sharp. */
   channelChamfer: number;
+  /** Groove mode: width of the tear groove around the (flush) traces, outward from the trace edge. */
+  grooveWidth: number;
+  /** Groove mode: depth of that groove. */
+  grooveDepth: number;
+  /** Groove mode: stepped stamp ridge (half-width tip against the trace edge) instead of a square one. */
+  grooveRidgeStepped: boolean;
   copperOffset: number;
 
   holes: boolean;
@@ -31,7 +37,7 @@ export interface Settings {
   stampThickness: number;
   stampClearance: number;
   tapeThickness: number;
-  /** Rib height (recessed) or pocket depth (raised); 0 = automatic. */
+  /** Rib height (recessed), pocket depth (raised) or ridge height (groove); 0 = automatic. */
   stampFeatureOverride: number;
   alignmentPins: boolean;
   pinMinHoleDiameter: number;
@@ -74,6 +80,9 @@ export const defaultSettings: Settings = {
   traceHeight: 0.4,
   traceDepth: 0.4,
   channelChamfer: 0,
+  grooveWidth: 0.8,
+  grooveDepth: 0.6,
+  grooveRidgeStepped: false,
   copperOffset: 0,
 
   holes: true,

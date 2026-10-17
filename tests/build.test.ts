@@ -376,6 +376,68 @@ describe('silkscreen marks', () => {
   });
 });
 
+describe('cut groove mode', () => {
+  // One 1 mm wide, 10 mm long trace; outline = trace box + 2 mm margin (15 × 5 mm).
+  const trace = () =>
+    toBoardInput([
+      parseLayerFile('g-F_Cu.gbr', ['%FSLAX46Y46*%', '%MOMM*%', '%ADD10C,1.0*%', 'D10*', 'X0Y0D02*', 'X10000000Y0D01*', 'M02*'].join(String.fromCharCode(10))),
+    ]);
+  // Ring between two stadiums (half-widths a < b) around the 10 mm stroke.
+  const ring = (a: number, b: number) => 10 * 2 * (b - a) + Math.PI * (b * b - a * a);
+  const opts = { sides: 'top' as const, mode: 'groove' as const, holes: false, margin: 2, alignmentPins: false };
+
+  it('cuts a groove of the set width and depth around flush traces', () => {
+    const r = buildModel(trace(), { ...defaultSettings, ...opts });
+    expect(r.parts[0].bodies.map((b) => b.name)).toEqual(['Board base']);
+    const board = r.parts[0].bodies[0].shape;
+    expect(isValid(board.wrapped)).toBe(true);
+    expect(15 * 5 * 1.6 - measureVolume(board)).toBeCloseTo(ring(0.5, 1.3) * 0.6, 4);
+    expect(board.boundingBox.bounds[1][2]).toBeCloseTo(1.6, 6);
+  });
+
+  it('builds a square stamp ridge by default', () => {
+    const r = buildModel(trace(), { ...defaultSettings, ...opts, stampEnabled: true });
+    const stamp = r.parts.find((p) => p.id === 'stampTop')!.bodies[0].shape;
+    expect(isValid(stamp.wrapped)).toBe(true);
+    // Ridge width 0.8 − 2·0.1 = 0.6 mm from 0.1 mm off the trace edge, full groove depth (0.6 mm) high.
+    expect(measureVolume(stamp) - 15 * 5 * 2).toBeCloseTo(ring(0.6, 1.2) * 0.6, 4);
+    const [min, max] = stamp.boundingBox.bounds;
+    expect(max[2] - min[2]).toBeCloseTo(2 + 0.6, 6);
+  });
+
+  it('builds a stepped stamp ridge, narrow tip against the trace edge', () => {
+    const r = buildModel(trace(), { ...defaultSettings, ...opts, stampEnabled: true, grooveRidgeStepped: true });
+    const stamp = r.parts.find((p) => p.id === 'stampTop')!.bodies[0].shape;
+    expect(isValid(stamp.wrapped)).toBe(true);
+    // Ridge width 0.8 − 2·0.1 = 0.6 mm from 0.1 mm off the trace edge; tip half as wide; each step 0.3 mm high.
+    const expected = (ring(0.6, 1.2) + ring(0.6, 0.9)) * 0.3;
+    expect(measureVolume(stamp) - 15 * 5 * 2).toBeCloseTo(expected, 4);
+    const [min, max] = stamp.boundingBox.bounds;
+    expect(max[2] - min[2]).toBeCloseTo(2 + 0.6, 6);
+  });
+
+  it('limits the groove depth to leave a floor', () => {
+    const r = buildModel(trace(), { ...defaultSettings, ...opts, boardThickness: 0.6, grooveDepth: 0.6 });
+    expect(r.warnings.some((w) => w.includes('Groove depth reduced to 0.40'))).toBe(true);
+    expect(r.warnings.some((w) => w.includes('material under the grooves'))).toBe(true);
+  });
+
+  it('warns when the stamp is off or the ridge is too narrow to print', () => {
+    const off = buildModel(trace(), { ...defaultSettings, ...opts });
+    expect(off.warnings.some((w) => w.includes('meant for the press stamp'))).toBe(true);
+    const thin = buildModel(trace(), { ...defaultSettings, ...opts, stampEnabled: true, grooveWidth: 0.5 });
+    expect(thin.warnings.some((w) => w.includes('narrower than the nozzle'))).toBe(true);
+  });
+
+  it('builds both halves and both stamps of a double-sided board', () => {
+    const r = build({ sides: 'both', mode: 'groove', stampEnabled: true });
+    expect(r.parts.map((p) => p.id)).toEqual(['topHalf', 'bottomHalf', 'dowels', 'stampTop', 'stampBottom']);
+    for (const p of r.parts) for (const b of p.bodies) expect(isValid(b.shape.wrapped)).toBe(true);
+    const flat = build({ sides: 'both', mode: 'raised' });
+    expect(vol(r, 'topHalf')).toBeLessThan(vol(flat, 'topHalf') - 1);
+  });
+});
+
 describe('copper cut patterns (SVG / DXF)', () => {
   const trace = () =>
     toBoardInput([

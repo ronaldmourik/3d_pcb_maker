@@ -18,6 +18,11 @@ describe('settings persistence', () => {
     expect(Object.keys(s).sort()).toEqual(Object.keys(defaultSettings).sort());
   });
 
+  it('keeps the cut groove mode and its dimensions', () => {
+    const s = migrateSettings({ mode: 'groove', grooveWidth: 1, grooveDepth: 0.5 });
+    expect([s.mode, s.grooveWidth, s.grooveDepth]).toEqual(['groove', 1, 0.5]);
+  });
+
   it('round-trips draft, view and user presets (but not built-ins)', () => {
     const st = memory();
     const draft = { ...defaultSettings, mode: 'raised' as const, traceHeight: 0.6 };
