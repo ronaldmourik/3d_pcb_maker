@@ -1,5 +1,5 @@
 // Thin helpers over raw OpenCascade operations that replicad does not batch for us.
-import { cast, getOC, Sketches, type AnyShape, type Drawing } from 'replicad';
+import { cast, getOC, measureArea, Sketches, type AnyShape, type Drawing } from 'replicad';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TopoShape = any;
@@ -59,6 +59,68 @@ export function unify(shape: TopoShape): TopoShape {
   } finally {
     u.delete();
   }
+}
+
+/**
+ * 2D offset of planar face(s) at z=0 with round joins (negative shrinks); null when nothing is left.
+ * Native and fast, unlike replicad's Drawing.offset, which gives up on large regions such as pours.
+ */
+export function offsetFace(shape: TopoShape, d: number): TopoShape | null {
+  const OC = oc();
+  // The offset returns bare wires; rebuild the region by nesting depth (even: solid, odd: hole).
+  const loops: { face: TopoShape; segs: number[][]; at: [number, number]; area: number }[] = [];
+  const faces = new OC.TopExp_Explorer(shape, OC.TopAbs_ShapeEnum.TopAbs_FACE, OC.TopAbs_ShapeEnum.TopAbs_SHAPE);
+  for (; faces.More(); faces.Next()) {
+    const mk = new OC.BRepOffsetAPI_MakeOffset(OC.TopoDS.Face(faces.Current()), OC.GeomAbs_JoinType.GeomAbs_Arc, false);
+    try {
+      mk.Perform(d, 0);
+      if (!mk.IsDone()) throw new Error('OpenCascade offset failed');
+      const wires = new OC.TopExp_Explorer(mk.Shape(), OC.TopAbs_ShapeEnum.TopAbs_WIRE, OC.TopAbs_ShapeEnum.TopAbs_SHAPE);
+      for (; wires.More(); wires.Next()) {
+        const wire = OC.TopoDS.Wire(wires.Current());
+        const mf = new OC.BRepBuilderAPI_MakeFace(wire, true);
+        const face = facesUp(mf.Face());
+        mf.delete();
+        // Each edge sampled on its own: ray crossing counts do not need the edges in order.
+        const segs: number[][] = [];
+        const edges = new OC.TopExp_Explorer(wire, OC.TopAbs_ShapeEnum.TopAbs_EDGE, OC.TopAbs_ShapeEnum.TopAbs_SHAPE);
+        for (; edges.More(); edges.Next()) {
+          const e = cast(edges.Current()) as any;
+          const n = e.geomType === 'LINE' ? 1 : 16;
+          let prev = e.pointAt(0);
+          for (let k = 1; k <= n; k++) {
+            const p = e.pointAt(k / n);
+            segs.push([prev.x, prev.y, p.x, p.y]);
+            prev = p;
+          }
+        }
+        edges.delete();
+        if (segs.length) loops.push({ face, segs, at: [segs[0][0], segs[0][1]], area: measureArea(cast(face) as any) });
+      }
+      wires.delete();
+    } finally {
+      mk.delete();
+    }
+  }
+  faces.delete();
+  if (!loops.length) return null;
+
+  const inside = ([x, y]: [number, number], segs: number[][]) => {
+    let odd = false;
+    for (const [x0, y0, x1, y1] of segs) if (y0 > y !== y1 > y && x < x0 + ((y - y0) * (x1 - x0)) / (y1 - y0)) odd = !odd;
+    return odd;
+  };
+  const byDepth: TopoShape[][] = [];
+  for (const l of loops) {
+    const depth = loops.filter((o) => o !== l && o.area > l.area && inside(l.at, o.segs)).length;
+    (byDepth[depth] ??= []).push(l.face);
+  }
+  let acc: TopoShape | null = null;
+  byDepth.forEach((fs, depth) => {
+    if (depth % 2 === 0) acc = fuseAll(acc ? [acc, ...fs] : fs);
+    else if (acc) acc = cutAll(acc, [fuseAll(fs)]);
+  });
+  return acc && !isNullOrEmpty(acc) ? acc : null;
 }
 
 export function isNullOrEmpty(shape: TopoShape | null): boolean {

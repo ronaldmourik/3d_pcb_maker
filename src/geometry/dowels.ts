@@ -14,7 +14,7 @@ export function placeDowels(
   /** Extra distance to keep from the copper (e.g. the groove around it). */
   copperClearance = 0,
 ): Pt[] {
-  const obstacles = copper.filter((c) => c.dark);
+  const obstacles = copper.filter((c) => c.dark).map(obstacle);
   const regions = shapes.map((s) => ({ outer: contourPoints(s.outer), holes: s.holes.map((h) => contourPoints(h)) }));
   if (!regions.length) {
     const { minX, minY, maxX, maxY } = bounds;
@@ -31,7 +31,7 @@ export function placeDowels(
       const dist = d.to ? distPointSegment(p, d.at, d.to) : Math.hypot(p[0] - d.at[0], p[1] - d.at[1]);
       if (dist < clearance + d.diameter / 2) return false;
     }
-    for (const c of obstacles) if (distToPrimitive(p, c) < clearance + copperClearance) return false;
+    for (const dist of obstacles) if (dist(p) < clearance + copperClearance) return false;
     return chosen.every((c) => Math.hypot(p[0] - c[0], p[1] - c[1]) >= 2 * socketRadius + margin * 2);
   };
 
@@ -62,15 +62,25 @@ export function placeDowels(
   return chosen;
 }
 
-function distToPrimitive(p: Pt, prim: Primitive): number {
-  if (prim.kind === 'circle') return Math.hypot(p[0] - prim.center[0], p[1] - prim.center[1]) - prim.r;
+/** Distance from a point to a copper primitive (0 inside); polygons are flattened once up front. */
+function obstacle(prim: Primitive): (p: Pt) => number {
+  if (prim.kind === 'circle') return (p) => Math.hypot(p[0] - prim.center[0], p[1] - prim.center[1]) - prim.r;
   if (prim.kind === 'stroke') {
-    if (prim.seg.type === 'line') return distPointSegment(p, prim.from, prim.seg.end) - prim.width / 2;
-    const pts = contourPoints({ start: prim.from, segs: [prim.seg] });
-    let d = Infinity;
-    for (let i = 0; i + 1 < pts.length; i++) d = Math.min(d, distPointSegment(p, pts[i], pts[i + 1]));
-    return d - prim.width / 2;
+    const seg = prim.seg;
+    if (seg.type === 'line') return (p) => distPointSegment(p, prim.from, seg.end) - prim.width / 2;
+    const pts = contourPoints({ start: prim.from, segs: [seg] });
+    return (p) => {
+      let d = Infinity;
+      for (let i = 0; i + 1 < pts.length; i++) d = Math.min(d, distPointSegment(p, pts[i], pts[i + 1]));
+      return d - prim.width / 2;
+    };
   }
-  const poly = contourPoints(prim.outer);
-  return pointInPolygon(p, poly) ? 0 : distToPolyline(p, poly);
+  const outer = contourPoints(prim.outer);
+  // Pours: their clearance holes around pads and drills are free space.
+  const holes = (prim.holes ?? []).map((h) => contourPoints(h));
+  return (p) => {
+    if (!pointInPolygon(p, outer)) return distToPolyline(p, outer);
+    const hole = holes.find((h) => pointInPolygon(p, h));
+    return hole ? distToPolyline(p, hole) : 0;
+  };
 }
