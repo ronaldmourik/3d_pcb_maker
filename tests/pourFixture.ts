@@ -84,3 +84,38 @@ export function pourArea(spec: PourSpec = DEFAULT_POUR, knockout = true): number
   if (knockout) a -= 3 * 2 - Math.PI * 0.25 * 0.25;
   return a;
 }
+
+/**
+ * Two neighbouring filled zones 1 mm apart (left tagged X2 'Conductor', right untagged), each with a pad on it,
+ * and a trace of another net below them. Board 40 × 20 mm (zones), trace at y = -4.
+ */
+export function twoZonesGerber(): string {
+  const rect = (x0: number, y0: number, x1: number, y1: number) => [
+    'G36*',
+    `X${c(x0)}Y${c(y0)}D02*`,
+    `X${c(x1)}Y${c(y0)}D01*`,
+    `X${c(x1)}Y${c(y1)}D01*`,
+    `X${c(x0)}Y${c(y1)}D01*`,
+    `X${c(x0)}Y${c(y0)}D01*`,
+    'G37*',
+  ];
+  return [
+    '%FSLAX46Y46*%',
+    '%MOMM*%',
+    '%LPD*%',
+    '%ADD10C,2*%',
+    '%ADD11C,1*%',
+    'G01*',
+    '%TA.AperFunction,Conductor*%',
+    ...rect(0, 0, 19.5, 20),
+    '%TD*%',
+    ...rect(20.5, 0, 40, 20),
+    'D10*',
+    `X${c(10)}Y${c(10)}D03*`,
+    `X${c(30)}Y${c(10)}D03*`,
+    'D11*',
+    `X${c(2)}Y${c(-4)}D02*`,
+    `X${c(38)}Y${c(-4)}D01*`,
+    'M02*',
+  ].join(N);
+}

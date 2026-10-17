@@ -1,17 +1,18 @@
 // Builds the printable B-rep parts (board / halves / dowels / stamps) with OpenCascade.
-import { cast, getOC, makeCompound, makeCylinder, type AnyShape, type Shape3D } from 'replicad';
-import type { BoardInput, Contour, Pt } from '../gerber/types';
+import { cast, getOC, makeCompound, makeCylinder, makeFace, type AnyShape, type Face, type Shape3D } from 'replicad';
+import type { BoardInput, Contour, Primitive, Pt } from '../gerber/types';
 import { buildOutline, type OutlineShape } from '../gerber/outline';
-import { addPt, contourPoints, drillsBounds, emptyBounds, isEmpty, primitivesBounds, type Bounds } from '../gerber/geom2d';
+import { addPt, contourPoints, drillsBounds, emptyBounds, isEmpty, polygonArea, primitivesBounds, type Bounds } from '../gerber/geom2d';
 import { resolveSides, type Settings } from '../state/settings';
 import { circlesFace, contourFace, drillsFace, layerFace, type FaceStats } from './faces';
-import { common, cutAll, fuseAll, isNullOrEmpty, isValid, prism, unify } from './occ';
+import { common, cutAll, facesUp, fuseAll, isNullOrEmpty, isValid, offsetFace, prism, unify } from './occ';
 import { placeDowels } from './dowels';
 import { chamferTools, edgeChamferTools, type ChamferStats } from './chamfer';
 import { GeometryCache, hashValue } from './cache';
 import { narrowGaps, narrowTraces, smallHoles, vanishedRegions } from './printability';
 import { faceLoops } from './paths';
 import { estimateNets } from './resistance';
+import { loopPolygon, splitZones } from './zones';
 import { mapPattern, type CutPattern, type PathSeg } from '../export/paths2d';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -124,8 +125,12 @@ export function buildModel(
   if (sides !== s.sides) warnings.push(`Only the ${sides} copper layer is available; generating a single-sided board.`);
   const doubleSided = sides === 'both';
 
+  /** Filled zones left as leftover copper tape (only where tape stays on the surface). */
+  const zonesOff = s.skipZones && (s.mode === 'groove' || s.mode === 'raised');
+
   // ---- outline ----
-  const outlineKey = key('outline', s.outlineSource, s.margin);
+  // Every copper-dependent stage key derives from this one, so the zone toggle is part of it.
+  const outlineKey = key('outline', s.outlineSource, s.margin, zonesOff);
   const { shapes, bounds, outlineFace } = staged(outlineKey, (warn) => {
     log('Building outline');
     let shapes: OutlineShape[] = [];
@@ -156,12 +161,46 @@ export function buildModel(
   });
   const cx = (bounds.minX + bounds.maxX) / 2;
 
+  /**
+   * Zones left as leftover copper: the zones and all copper connected to them (one island of the merged layer
+   * is one net) are dropped. `fill` is those islands with their holes filled; its outline gets a separator.
+   */
+  const zoneSplit = (side: 'top' | 'bottom'): { prims: Primitive[]; fill: TopoShape | null; outlines: Pt[][]; zones: number; connected: number } =>
+    cache.get(key('zones', side), () => {
+      const prims = (side === 'top' ? input.top : input.bottom) ?? [];
+      const none = { prims, fill: null, outlines: [], zones: 0, connected: 0 };
+      if (!prims.some((p) => p.kind === 'contour' && p.zone)) return none;
+      log(`Finding ${side} filled zones`);
+      const merged = layerFace(prims, 0, { failed: 0 });
+      if (!merged) return none;
+      const faces = faceList(merged);
+      const islands = faces.map((f) => faceLoops(f).map(loopPolygon));
+      const split = splitZones(prims, islands);
+      if (!split.zoneIslands.length) return none;
+      const outlines = split.zoneIslands.flatMap((i) => islands[i].filter((l) => polygonArea(l) > 0));
+      const fill = fuseAll(split.zoneIslands.map((i) => facesUp(makeFace((cast(faces[i]) as Face).outerWire()).wrapped)));
+      return { prims: split.kept, fill, outlines, zones: split.zoneIslands.length, connected: split.connected };
+    });
+  if (zonesOff)
+    for (const side of (doubleSided ? ['top', 'bottom'] : [sides]) as ('top' | 'bottom')[]) {
+      const z = zoneSplit(side);
+      if (z.zones)
+        issues.push({
+          level: 'info',
+          side,
+          at: z.outlines[0][0],
+          message: `${z.zones} filled zone(s) and ${z.connected} connected pad(s)/trace(s) left as leftover copper, separated by a groove along the zone outline`,
+        });
+    }
+  /** The copper primitives of a side that are processed. */
+  const layerPrims = (side: 'top' | 'bottom'): Primitive[] => (zonesOff ? zoneSplit(side).prims : ((side === 'top' ? input.top : input.bottom) ?? []));
+
   /** Merged copper of one side grown by `offset`, clipped to the outline (shared, do not consume). */
   const copperFace = (side: 'top' | 'bottom', offset: number): TopoShape | null =>
     staged(key(outlineKey, 'copper', side, offset), (warn, report) => {
       const label = `Merging ${side} copper${offset ? ` (offset ${offset.toFixed(2)} mm)` : ''}`;
       log(label);
-      const prims = (side === 'top' ? input.top : input.bottom) ?? [];
+      const prims = layerPrims(side);
       const st: FaceStats = { failed: 0 };
       let f = layerFace(prims, offset, st, (i, n) => log(`${label} ${i}/${n}`));
       if (st.failed) warn(`${st.failed} copper primitive(s) could not be converted and were skipped.`);
@@ -187,7 +226,7 @@ export function buildModel(
     if (size < s.channelChamfer) warn(`Channel chamfer limited to ${size.toFixed(2)} mm by the channel depth.`);
     if (size <= 0.01) return board;
     log(`Chamfering ${side} channels`);
-    const prims = (side === 'top' ? input.top : input.bottom) ?? [];
+    const prims = layerPrims(side);
     const cs: ChamferStats = { lofted: 0, stepped: 0, failed: 0 };
     try {
       const tools = chamferTools(prims, s.copperOffset, top, size, cs, (i, n) => log(`Chamfering ${side} channels ${i}/${n}`));
@@ -263,14 +302,36 @@ export function buildModel(
   };
 
   // ---- board / halves ----
-  /** The ring between two outward copper offsets, clipped to the outline (null when empty). */
+  /**
+   * Zones left as leftover copper: the ring between two outward offsets of the zone outlines, so neighbouring
+   * zones (and the zones and the rest) are cut apart in the tape. It never cuts into processed copper.
+   */
+  const zoneSeparator = (side: 'top' | 'bottom', inner: number, outer: number): TopoShape | null => {
+    if (!zonesOff || outer <= inner) return null;
+    const fill = zoneSplit(side).fill;
+    if (!fill) return null;
+    return staged(key(outlineKey, 'separator', side, inner, outer), () => {
+      log(`Building ${side} zone separator`);
+      const wide = offsetFace(fill, outer);
+      if (!wide) return null;
+      const narrow = Math.abs(inner) > 1e-9 ? offsetFace(fill, inner) : fill;
+      let r = narrow ? cutAll(wide, [narrow]) : wide;
+      const keep = copperFace(side, inner);
+      if (keep) r = cutAll(r, [keep]);
+      r = unify(common(r, outlineFace));
+      return isNullOrEmpty(r) ? null : r;
+    });
+  };
+  /** The ring between two outward copper offsets (plus the zone separators), clipped to the outline (null when empty). */
   const band = (side: 'top' | 'bottom', inner: number, outer: number): TopoShape | null => {
     if (outer <= inner) return null;
     const wide = copperFace(side, outer);
-    if (!wide) return null;
-    const narrow = copperFace(side, inner);
-    const r = unify(common(narrow ? cutAll(wide, [narrow]) : wide, outlineFace));
-    return isNullOrEmpty(r) ? null : r;
+    const narrow = wide && copperFace(side, inner);
+    let r: TopoShape | null = wide ? unify(common(narrow ? cutAll(wide, [narrow]) : wide, outlineFace)) : null;
+    if (r && isNullOrEmpty(r)) r = null;
+    const sep = zoneSeparator(side, inner, outer);
+    if (sep) r = r ? unify(fuseAll([r, sep])) : sep;
+    return r;
   };
   /** Groove depth, limited to leave a 0.2 mm floor. */
   const grooveDepth = (thickness: number) => (s.grooveDepth > thickness - 0.2 ? Math.max(0.1, thickness - 0.2) : s.grooveDepth);
@@ -307,8 +368,15 @@ export function buildModel(
         copper = as3D(prism(cf, thickness, s.traceHeight));
         if (s.channelChamfer > 0) copper = chamferRaised(copper, cf, side, thickness + s.traceHeight, warn, report);
       }
-    } else {
+    } else if (!(zonesOff && zoneSplit(side).fill)) {
       warn(`The ${side} copper layer is empty after clipping to the outline.`);
+    }
+    // Zones left as leftover copper: a groove along their outlines. Groove mode gets it through band(); raised
+    // mode cuts it as a knife guide. A side with nothing but zones still gets its separator here.
+    if (zonesOff && (s.mode === 'raised' || !cf)) {
+      const sep = s.mode === 'raised' ? zoneSeparator(side, s.copperOffset, s.copperOffset + s.grooveWidth) : band(side, s.copperOffset, s.copperOffset + s.grooveWidth);
+      const d = grooveDepth(thickness);
+      if (sep) board = board.cut(as3D(prism(sep, thickness - d, d + 1)));
     }
     const silk = silkFace(side);
     let silkBody: Shape3D | null = null;
@@ -339,7 +407,7 @@ export function buildModel(
     return { board, copper, silk: silkBody };
   };
   const slab = (thickness: number, side: 'top' | 'bottom', socketsFace: TopoShape | null, socketDepth: number, socketsKey = '') => {
-    const featureH = s.mode === 'recessed' ? s.traceDepth : s.mode === 'groove' ? key(s.grooveWidth, s.grooveDepth) : s.traceHeight;
+    const featureH = s.mode === 'recessed' ? s.traceDepth : s.mode === 'groove' ? key(s.grooveWidth, s.grooveDepth) : key(s.traceHeight, zonesOff ? key(s.grooveWidth, s.grooveDepth) : '');
     const chamfer = s.mode === 'groove' ? 0 : s.channelChamfer;
     const silkKey = key(s.silkMode, s.silkDepth, s.silkMinWidth, s.silkClearance, s.silkSeparate);
     const k = key(outlineKey, holesKey, 'slab', thickness, side, s.mode, featureH, chamfer, s.copperOffset, socketsKey, socketDepth, silkKey, s.mode === 'conductive' ? s.conductiveEmbed : '');
@@ -385,11 +453,16 @@ export function buildModel(
       if (depth < s.dowelDepth) warnings.push(`Dowel socket depth limited to ${depth.toFixed(2)} mm by the half thickness.`);
       if (depth >= 0.3) {
         const socketR = (s.dowelDiameter + s.dowelClearance) / 2;
-        const featureDepth = s.mode === 'recessed' ? s.traceDepth : s.mode === 'groove' ? s.grooveDepth : 0;
+        const featureDepth = s.mode === 'recessed' ? s.traceDepth : s.mode === 'groove' || zonesOff ? s.grooveDepth : 0;
         const avoid = featureDepth > 0 && featureDepth + depth > half - 0.2;
-        const avoidGap = avoid && s.mode === 'groove' ? Math.max(0, s.copperOffset + s.grooveWidth) : 0;
+        const avoidGap = avoid && (s.mode === 'groove' || zonesOff) ? Math.max(0, s.copperOffset + s.grooveWidth) : 0;
+        // Raised copper sits on top and needs no keep-out; zone separators always cut into the board.
+        const avoidPrims = (): Primitive[] => [
+          ...(s.mode === 'raised' ? [] : [...layerPrims('top'), ...layerPrims('bottom')]),
+          ...(zonesOff ? (['top', 'bottom'] as const).flatMap((side) => zoneSplit(side).outlines.flatMap(outlineStrokes)) : []),
+        ];
         dowelPositions = cache.get(key(outlineKey, 'dowels', s.dowelCount, socketR, s.dowelEdgeMargin, avoid, avoidGap), () =>
-          placeDowels(shapes, bounds, input.drills, s.dowelCount, socketR, s.dowelEdgeMargin, avoid ? [...(input.top ?? []), ...(input.bottom ?? [])] : [], avoidGap),
+          placeDowels(shapes, bounds, input.drills, s.dowelCount, socketR, s.dowelEdgeMargin, avoid ? avoidPrims() : [], avoidGap),
         );
         if (dowelPositions.length < s.dowelCount) warnings.push(`Only ${dowelPositions.length} of ${s.dowelCount} dowel positions fit on the board.`);
         socketsKey = key('sockets', socketR, JSON.stringify(dowelPositions));
@@ -423,7 +496,7 @@ export function buildModel(
       const minFeature = conductive ? Math.max(2 * n, s.conductiveMinWidth) : 2 * n;
       staged(key(outlineKey, 'drc', side, s.copperOffset, n, s.minGap, minFeature), (_warn, report) => {
         log(`Checking ${side} copper printability`);
-        const prims = (side === 'top' ? input.top : input.bottom) ?? [];
+        const prims = layerPrims(side);
         const opts = { nozzle: n, minGap: s.minGap, copperOffset: s.copperOffset, minFeature };
         const found = [...narrowTraces(prims, opts)];
         const cf = copperFace(side, s.copperOffset);
@@ -475,7 +548,7 @@ export function buildModel(
       staged(key(outlineKey, 'nets', side, s.copperOffset, s.conductiveResistivity, s.traceHeight), (_warn, report) => {
         const cf = copperFace(side, s.copperOffset);
         if (!cf) return;
-        const prims = (side === 'top' ? input.top : input.bottom) ?? [];
+        const prims = layerPrims(side);
         const islands = faceList(cf).map((f) => faceLoops(f));
         const nets = estimateNets(prims, islands, s.conductiveResistivity, s.traceHeight, s.copperOffset).sort((a, b) => b.resistance - a.resistance);
         for (const net of nets)
@@ -647,7 +720,12 @@ function slotLoop(a: Pt, b: Pt, r: number): PathSeg[] {
 }
 
 /** The individual faces of a (compound) face shape. */
-function faceList(shape: TopoShape): TopoShape[] {
+/** A closed polygon as zero-width strokes (an obstacle line for dowel placement). */
+function outlineStrokes(poly: Pt[]): Primitive[] {
+  return poly.map((p, i) => ({ kind: 'stroke', dark: true, from: p, seg: { type: 'line', end: poly[(i + 1) % poly.length] }, width: 0 }));
+}
+
+export function faceList(shape: TopoShape): TopoShape[] {
   const OC = getOC() as any;
   const out: TopoShape[] = [];
   const exp = new OC.TopExp_Explorer(shape, OC.TopAbs_ShapeEnum.TopAbs_FACE, OC.TopAbs_ShapeEnum.TopAbs_SHAPE);

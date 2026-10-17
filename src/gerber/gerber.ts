@@ -2,6 +2,7 @@
 import type { Contour, Primitive, Pt, Seg } from './types';
 import { evalMacroExpr } from './macroExpr';
 import { splitFracturedContour } from './regions';
+import { contourPoints, polygonArea } from './geom2d';
 
 interface Format {
   intDigits: number;
@@ -36,6 +37,9 @@ export function looksLikeGerber(text: string): boolean {
   return /%FS[LT]?[AI]X\d\dY\d\d/.test(text) || /%MO(MM|IN)\*%/.test(text) || /%ADD\d+/.test(text);
 }
 
+/** Area (mm²) from which an unattributed region counts as a filled zone rather than a pad. */
+export const ZONE_MIN_AREA = 25;
+
 class GerberParser {
   out: Primitive[] = [];
   warnings: string[] = [];
@@ -49,6 +53,8 @@ class GerberParser {
   private interp: 'G01' | 'G02' | 'G03' = 'G01';
   private singleQuadrant = false;
   private dark = true;
+  /** Gerber X2 aperture function (%TA.AperFunction%) in effect, e.g. 'Conductor' or 'SMDPad,CuDef'. */
+  private aperFunction: string | null = null;
   private x = 0;
   private y = 0;
   private lastD = 2;
@@ -117,6 +123,14 @@ class GerberParser {
           break;
         case 'SR':
           this.stepRepeat(stmt);
+          break;
+        case 'TA': {
+          const m = /^TA.AperFunction,(.*)$/.exec(stmt);
+          if (m) this.aperFunction = m[1];
+          break;
+        }
+        case 'TD':
+          if (stmt === 'TD' || stmt === 'TD.AperFunction') this.aperFunction = null;
           break;
         case 'TF': {
           const m = /^TF\.FileFunction,(.*)$/.exec(stmt);
@@ -330,11 +344,24 @@ class GerberParser {
     if (!this.region) return;
     this.closeContour();
     for (const c of this.region.contours) {
-      const parts = splitFracturedContour(c);
-      if (parts) for (const r of parts) this.emit({ kind: 'contour', dark: this.dark, outer: r.outer, holes: r.holes.length ? r.holes : undefined });
-      else this.emit({ kind: 'contour', dark: this.dark, outer: c });
+      const parts = splitFracturedContour(c) ?? [{ outer: c, holes: [] }];
+      for (const r of parts) {
+        const p: Primitive = { kind: 'contour', dark: this.dark, outer: r.outer, holes: r.holes.length ? r.holes : undefined };
+        if (this.dark && this.isZone(r.outer, r.holes.length > 0)) p.zone = true;
+        this.emit(p);
+      }
     }
     this.region = null;
+  }
+
+  /**
+   * Is this region a filled zone (copper pour)? X2 files say so (KiCad, Altium, EasyEDA: 'Conductor'; pads are
+   * '...Pad...'). Without attributes: a region with clearance holes, or one larger than any sensible pad.
+   */
+  private isZone(outer: Contour, hasHoles: boolean): boolean {
+    const f = this.aperFunction;
+    if (f) return /^(Non)?Conductor/.test(f);
+    return hasHoles || Math.abs(polygonArea(contourPoints(outer))) >= ZONE_MIN_AREA;
   }
 
   private flash(at: Pt) {

@@ -2,11 +2,14 @@
 // It caught: Drawing.offset crashing on the pour (every grown/shrunk copper stage), solids made invalid by
 // pour vertices lying just off the line between their neighbours, and dowels never fitting in pour holes.
 import { beforeAll, describe, expect, it } from 'vitest';
-import { measureArea, cast } from 'replicad';
+import { cast, makeBox, measureArea, measureVolume } from 'replicad';
+import type { Primitive, Pt } from '../src/gerber/types';
+import { faceLoops } from '../src/geometry/paths';
+import { loopPolygon, splitZones } from '../src/geometry/zones';
 import { fixtureLayers, initOC } from './helpers';
 import { toBoardInput } from '../src/gerber/loadFiles';
 import { layerFace } from '../src/geometry/faces';
-import { buildModel } from '../src/geometry/brep';
+import { buildModel, faceList } from '../src/geometry/brep';
 import { isValid } from '../src/geometry/occ';
 import { defaultSettings } from '../src/state/settings';
 
@@ -45,5 +48,44 @@ describe('ketel_opto with a filled zone', () => {
     const r = buildModel(input(), { ...defaultSettings, sides: 'both', mode: 'recessed', dowelDiameter: 1, dowelEdgeMargin: 0.3 });
     expect(r.dowelPositions).toHaveLength(4);
     for (const p of r.parts) for (const b of p.bodies) expect(isValid(b.shape.wrapped), `${p.id} ${b.name}`).toBe(true);
+  });
+});
+
+describe('ketel_opto: filled zone left as leftover copper', () => {
+  const anchor = (p: Primitive): Pt => (p.kind === 'circle' ? p.center : p.kind === 'stroke' ? p.from : p.outer.start);
+  /** Board material in a 0.2 × 0.2 × 0.1 mm probe just under the top surface at (x, y). */
+  const material = (shape: any, x: number, y: number, top: number) =>
+    measureVolume(shape.clone().intersect(makeBox([x - 0.1, y - 0.1, top - 0.1], [x + 0.1, y + 0.1, top])));
+
+  it('drops the zone and exactly the copper connected to it', () => {
+    const prims = input().bottom!;
+    const merged = layerFace(prims, 0, { failed: 0 });
+    const islands = faceList(merged).map((f) => faceLoops(f).map(loopPolygon));
+    const { kept, zoneIslands, connected } = splitZones(prims, islands);
+    expect(zoneIslands).toHaveLength(1);
+    const dropped = prims.filter((p) => !kept.includes(p) && !(p.kind === 'contour' && p.zone)).map(anchor);
+    // The KETEL_0V copper on B.Cu: J1/J3 pin 2, D1 A, U1 K, K1 NO and the short trace at U1.
+    const expected: Pt[] = [[109.08, -105], [109.08, -173], [110, -139.81], [115.19, -139.77], [116.3, -160.4], [115.15, -139.81]];
+    expect(connected).toBe(expected.length);
+    for (const e of expected) expect(dropped.some((d) => Math.hypot(d[0] - e[0], d[1] - e[1]) < 1e-6), String(e)).toBe(true);
+  });
+
+  it('grooves the zone outline but not the zone (groove and raised)', () => {
+    for (const mode of ['groove', 'raised'] as const) {
+      const r = buildModel(input(), { ...defaultSettings, sides: 'bottom', mode, skipZones: true, stampEnabled: true });
+      expect(r.issues.some((i) => i.level === 'info' && i.message.includes('1 filled zone(s) and 6 connected'))).toBe(true);
+      for (const p of r.parts) for (const b of p.bodies) expect(isValid(b.shape.wrapped), `${mode} ${p.id} ${b.name}`).toBe(true);
+      // Bottom boards are mirrored about the board centre x = 130: the zone edge at x = 159 lands at x = 101.
+      const board = r.parts[0].bodies[0].shape;
+      const T = defaultSettings.boardThickness;
+      expect(material(board, 260 - 159.4, -140, T), `${mode} separator`).toBeLessThan(1e-6);
+      expect(material(board, 260 - 125, -165, T), `${mode} zone`).toBeGreaterThan(0.0039);
+      if (mode === 'raised') expect(measureVolume(r.parts[0].bodies[1].shape)).toBeLessThan(250); // traces only, no pour
+    }
+  });
+
+  it('fits the dowels once the zone is not grooved', () => {
+    const r = buildModel(input(), { ...defaultSettings, sides: 'both', mode: 'groove', skipZones: true });
+    expect(r.dowelPositions).toHaveLength(4);
   });
 });

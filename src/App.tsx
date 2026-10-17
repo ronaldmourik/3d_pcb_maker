@@ -37,6 +37,7 @@ export default function App() {
         <PresetBar presets={b.presets} onUse={b.loadPreset} onSave={b.savePreset} onDelete={b.deletePreset} />
         <SettingsPanel
           hasSilk={b.hasSilk}
+          hasZones={b.hasZones}
           draft={b.draft}
           onChange={b.setDraft}
           hasTop={b.hasTop}
