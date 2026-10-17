@@ -395,8 +395,18 @@ describe('cut groove mode', () => {
     expect(board.boundingBox.bounds[1][2]).toBeCloseTo(1.6, 6);
   });
 
-  it('builds a stepped stamp ridge, narrow tip against the trace edge', () => {
+  it('builds a square stamp ridge by default', () => {
     const r = buildModel(trace(), { ...defaultSettings, ...opts, stampEnabled: true });
+    const stamp = r.parts.find((p) => p.id === 'stampTop')!.bodies[0].shape;
+    expect(isValid(stamp.wrapped)).toBe(true);
+    // Ridge width 0.8 − 2·0.1 = 0.6 mm from 0.1 mm off the trace edge, full groove depth (0.6 mm) high.
+    expect(measureVolume(stamp) - 15 * 5 * 2).toBeCloseTo(ring(0.6, 1.2) * 0.6, 4);
+    const [min, max] = stamp.boundingBox.bounds;
+    expect(max[2] - min[2]).toBeCloseTo(2 + 0.6, 6);
+  });
+
+  it('builds a stepped stamp ridge, narrow tip against the trace edge', () => {
+    const r = buildModel(trace(), { ...defaultSettings, ...opts, stampEnabled: true, grooveRidgeStepped: true });
     const stamp = r.parts.find((p) => p.id === 'stampTop')!.bodies[0].shape;
     expect(isValid(stamp.wrapped)).toBe(true);
     // Ridge width 0.8 − 2·0.1 = 0.6 mm from 0.1 mm off the trace edge; tip half as wide; each step 0.3 mm high.

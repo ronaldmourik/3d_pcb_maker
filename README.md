@@ -20,7 +20,7 @@ Browser app that turns Gerber + Excellon exports (KiCad or any EDA tool) into 3D
 - **Raised**: traces stand proud and you cut the tape along them.
 - **Cut groove**: the board is flat, with a groove around every trace (default 0.8 mm wide and 0.6 mm deep, measured outward from the trace edge). To use it:
   1. Stick copper tape over the board.
-  2. Press the stamp on. Its stepped ridge (groove width minus the clearance on each side) pushes the tape into the groove and tears it at the trace edge.
+  2. Press the stamp on. Its ridge (groove width minus the clearance on each side) pushes the tape into the groove and tears it at the trace edge. The ridge is square by default; optionally it is stepped, with a half-width tip against the trace edge.
   3. Peel off the waste.
 - **Conductive filament**: traces are a second material, embedded flush or on top. Each net gets a resistance estimate.
 

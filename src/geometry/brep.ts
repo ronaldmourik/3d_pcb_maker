@@ -508,7 +508,7 @@ export function buildModel(
     const stampSides: ('top' | 'bottom')[] = doubleSided ? ['top', 'bottom'] : [sides as 'top' | 'bottom'];
     for (const side of stampSides) {
       const stampKey = key(outlineKey, holesKey, 'stamp', side, s.mode, s.copperOffset, s.traceDepth, s.traceHeight, s.stampThickness, s.stampClearance,
-        s.tapeThickness, s.stampFeatureOverride, s.alignmentPins, s.pinMinHoleDiameter, s.pinClearance, s.pinLength, s.cuttingRidge, s.ridgeWidth, s.ridgeHeight, s.grooveWidth, s.grooveDepth, s.boardThickness, doubleSided);
+        s.tapeThickness, s.stampFeatureOverride, s.alignmentPins, s.pinMinHoleDiameter, s.pinClearance, s.pinLength, s.cuttingRidge, s.ridgeWidth, s.ridgeHeight, s.grooveWidth, s.grooveDepth, s.grooveRidgeStepped, s.boardThickness, doubleSided);
       const stamp = staged(stampKey, (warn) => {
         log(`Building ${side} stamp`);
         return buildStamp(side, warn);
@@ -536,7 +536,7 @@ export function buildModel(
       pinBase = ts;
       pinTop = ts + s.pinLength;
     } else if (s.mode === 'groove') {
-      // Stepped ridge into the groove, its narrow tip against the trace edge where the tape should tear.
+      // Ridge into the groove: square, or stepped with its narrow tip against the trace edge where the tape should tear.
       const d = grooveDepth(doubleSided ? s.boardThickness / 2 : s.boardThickness);
       const rh = s.stampFeatureOverride > 0 ? s.stampFeatureOverride : d;
       const inner = s.copperOffset + s.stampClearance;
@@ -545,9 +545,13 @@ export function buildModel(
       let ridge = 0;
       if (w > 0) {
         const base = band(side, inner, inner + w);
-        const tip = band(side, inner, inner + w / 2);
-        if (base) stamp = stamp.fuse(as3D(prism(base, ts, rh / 2)));
-        if (tip) stamp = stamp.fuse(as3D(prism(tip, ts + rh / 2, rh / 2)));
+        if (s.grooveRidgeStepped) {
+          const tip = band(side, inner, inner + w / 2);
+          if (base) stamp = stamp.fuse(as3D(prism(base, ts, rh / 2)));
+          if (tip) stamp = stamp.fuse(as3D(prism(tip, ts + rh / 2, rh / 2)));
+        } else if (base) {
+          stamp = stamp.fuse(as3D(prism(base, ts, rh)));
+        }
         if (base) ridge = rh;
         else warn(`The ${side} stamp has no ridge (copper layer empty).`);
       } else {

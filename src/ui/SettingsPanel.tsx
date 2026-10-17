@@ -189,6 +189,7 @@ export function SettingsPanel({ hasSilk, draft, onChange, hasTop, hasBottom, has
             {num('stampClearance', 'Clearance per side', { step: 0.02, min: 0 })}
             {num('tapeThickness', 'Copper tape thickness', { step: 0.01, min: 0 })}
             {num('stampFeatureOverride', recessed ? 'Rib height (0 = auto)' : groove ? 'Ridge height (0 = groove depth)' : 'Pocket depth (0 = auto)', { step: 0.05, min: 0 })}
+            {groove && bool('grooveRidgeStepped', 'Stepped ridge', 'Off: one square ridge. On: full width at the base, half width at the tip against the trace edge.')}
             {!flat && bool('cuttingRidge', 'Cutting ridge around pockets')}
             {!flat && draft.cuttingRidge && (
               <>

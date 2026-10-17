@@ -15,6 +15,8 @@ export interface Settings {
   grooveWidth: number;
   /** Groove mode: depth of that groove. */
   grooveDepth: number;
+  /** Groove mode: stepped stamp ridge (half-width tip against the trace edge) instead of a square one. */
+  grooveRidgeStepped: boolean;
   copperOffset: number;
 
   holes: boolean;
@@ -80,6 +82,7 @@ export const defaultSettings: Settings = {
   channelChamfer: 0,
   grooveWidth: 0.8,
   grooveDepth: 0.6,
+  grooveRidgeStepped: false,
   copperOffset: 0,
 
   holes: true,
